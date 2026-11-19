@@ -134,6 +134,16 @@ class TrackDecryptor {
     return best || new Mp4Box({ size: 0, type: '', offset: 0, data: Buffer.alloc(0) })
   }
 
+  // FLAC-in-MP4：'fLaC' 签名 + dfLa 元数据体 + 按样本顺序拼接的解密帧
+  buildFlacFile(flacMetadata, decryptedSamples) {
+    const flacSignature = Buffer.from('fLaC')
+    const metadataBody = flacMetadata.length > 4
+      ? flacMetadata.subarray(4)
+      : flacMetadata
+
+    return Buffer.concat([flacSignature, metadataBody, ...decryptedSamples])
+  }
+
   createFileName({ title, artist, extension }) {
     const safeTitle = sanitizeFilenamePart(title, 'track')
     const safeArtist = sanitizeFilenamePart(artist, 'unknown')
