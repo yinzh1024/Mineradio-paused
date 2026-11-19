@@ -1,5 +1,8 @@
 'use strict';
 
+// 签名通道依赖本机汽水客户端，单测走 mock 旧通道
+process.env.MINERADIO_QISHUI_BDMS_SIGN = '0';
+
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const https = require('node:https');

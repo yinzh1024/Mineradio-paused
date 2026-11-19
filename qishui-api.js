@@ -6,6 +6,8 @@ const http = require('http');
 const https = require('https');
 const path = require('path');
 
+const qishuiBdmsSigner = require('./qishui-bdms-signer');
+
 const QISHUI_API_BASE = (process.env.QISHUI_API_BASE || 'https://open.douyin.com').replace(/\/+$/, '');
 const QISHUI_RELATED_MEDIA_PATH = '/api/luna/v1/platform/feed/related-media/';
 const QISHUI_FEED_SONG_TAB_PATH = '/api/luna/v1/platform/feed/song-tab/';
@@ -31,6 +33,10 @@ const QISHUI_PUBLIC_HEADERS = {
 };
 const QISHUI_WEB_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) SodaMusic/3.1.0 Chrome/136.0.7103.59 Electron/36.4.0-rs.22.release.main.1 TTElectron/36.4.0-rs.22.release.main.1 Safari/537.36';
 const QISHUI_PC_APP_UA = 'LunaPC/3.3.0(359450208)';
+// bdms 签名通道（官方 PC 客户端同款请求形态）。版本常量已实测可用，可用环境变量覆盖。
+const QISHUI_PC_SIGNED_VERSION = process.env.QISHUI_PC_SIGNED_VERSION || '3.7.0';
+const QISHUI_PC_SIGNED_VERSION_CODE = process.env.QISHUI_PC_SIGNED_VERSION_CODE || '30070000';
+const QISHUI_PC_SIGNED_BUILD_ID = process.env.QISHUI_PC_SIGNED_BUILD_ID || '359450208';
 const QISHUI_WEB_DEFAULT_PARAMS = {
   aid: '386088',
   app_name: 'luna_pc',
@@ -3265,10 +3271,78 @@ async function fetchQishuiPcTrackV2Get(trackId, cookieText) {
   return json;
 }
 
+// bdms 签名通道：复刻官方 PC 客户端请求形态（app.ts 拦截器 + LunaPC UA + X-SS-STUB）。
+// 无签名时字节风控对 track_v2 一律返回空响应，因此该通道优先。
+async function fetchQishuiPcTrackV2Signed(trackId, cookieText) {
+  const cookie = normalizeQishuiCookieInput(cookieText);
+  const deviceId = qishuiBdmsSigner.loadDeviceId();
+  if (!deviceId) {
+    const err = new Error('汽水签名设备ID不可用（缺少扫码登录设备身份）');
+    err.code = 'QISHUI_BDMS_NO_DEVICE';
+    throw err;
+  }
+  const body = JSON.stringify({
+    track_id: trackId,
+    media_type: 'track',
+    queue_type: 'favorite_track_playlist',
+    scene_name: 'library',
+  });
+  const url = qishuiPcUrl('/luna/pc/track_v2', qishuiPcAppParams({
+    device_id: deviceId,
+    iid: deviceId,
+    fp: deviceId,
+    version_name: QISHUI_PC_SIGNED_VERSION,
+    version_code: QISHUI_PC_SIGNED_VERSION_CODE,
+    track_id: trackId,
+    media_type: 'track',
+  }));
+  const headers = qishuiWebHeaders(qishuiSessionCookieHeader(cookie), { sessionOnly: true, pcApp: true });
+  headers['User-Agent'] = `LunaPC/${QISHUI_PC_SIGNED_VERSION}(${QISHUI_PC_SIGNED_BUILD_ID})`;
+  headers['X-SS-STUB'] = crypto.createHash('md5').update(body).digest('hex').toUpperCase();
+  headers['Content-Length'] = Buffer.byteLength(body);
+  // 官方 app.ts：key\r\nvalue 行拼接整体签名，返回值按名值对拆开并入 headers
+  const headerLines = Object.entries(headers).map(([key, value]) => `${key}\r\n${value}`).join('\r\n');
+  const signatureParts = qishuiBdmsSigner.generateHttpSignatureHeaders(url, headerLines, deviceId)
+    .split('\r\n')
+    .filter(part => part.trim());
+  for (let i = 0; i + 1 < signatureParts.length; i += 2) {
+    headers[signatureParts[i]] = signatureParts[i + 1];
+  }
+  const json = await requestJson(url, {
+    method: 'POST',
+    timeoutMs: 5000,
+    headers,
+  }, body);
+  const statusError = qishuiPcStatusError(json, 'QISHUI_PC_TRACK_V2_SIGNED_FAILED');
+  if (statusError) throw statusError;
+  return json;
+}
+
 async function fetchQishuiPcTrackV2(trackId, cookieText) {
   const cookie = normalizeQishuiCookieInput(cookieText);
   const cacheKey = 'track-v2-meta|' + qishuiCookieFingerprint(cookie) + '|' + normalizeText(trackId);
   return qishuiTrackMetadataCache.wrap(cacheKey, 20 * 1000, async () => {
+    if (qishuiBdmsSigner.isAvailable()) {
+      try {
+        return await fetchQishuiPcTrackV2Signed(trackId, cookie);
+      } catch (signedError) {
+        if (qishuiSessionExpired(signedError)) throw signedError;
+        // 签名通道失败（模块缺失/网络抖动）时回退旧通道
+        try {
+          return await fetchQishuiPcTrackV2Post(trackId, cookie);
+        } catch (postError) {
+          try {
+            const got = await fetchQishuiPcTrackV2Get(trackId, cookie);
+            got.signedError = signedError && signedError.message || String(signedError);
+            return got;
+          } catch (getError) {
+            getError.postError = postError && postError.message || String(postError);
+            getError.signedError = signedError && signedError.message || String(signedError);
+            throw getError;
+          }
+        }
+      }
+    }
     try {
       return await fetchQishuiPcTrackV2Post(trackId, cookie);
     } catch (postError) {
