@@ -46,6 +46,8 @@ let desktopLyricsLastMiddleAt = 0;
 let htmlFullscreenActive = false;
 let windowFullscreenActive = false;
 let windowFullscreenDisplayId = null;
+// 进入全屏前的窗口几何，用于退回窗口模式时恢复（Wayland 平铺合成器下尤其重要）
+let windowedBoundsBeforeFullscreen = null;
 let mainWindowStateTimer = null;
 let appMemoryTrimTimer = null;
 let appMemoryTrimInFlight = false;
@@ -1919,6 +1921,10 @@ function getWindowState(win) {
 
 function setMainWindowFullscreenResizeGuard(win, fullscreen) {
   if (!win || win.isDestroyed()) return;
+  // Linux（尤其 Wayland）上把窗口锁成不可调整大小，会连同最小/最大尺寸一起
+  // 锁住表面，全屏到 800x480 这类更小的输出时 Chromium 不再接受合成器下发
+  // 的尺寸，界面按旧尺寸绘制后被裁切。这里保持可调整大小。
+  if (fullscreen && process.platform === 'linux') return;
   const shouldResize = !fullscreen;
   try {
     if (typeof win.isResizable === 'function' && win.isResizable() === shouldResize) return;
@@ -3351,10 +3357,29 @@ async function clearAllProviderLoginState(reason) {
   return { ok: true };
 }
 
+function findDisplayByWindowSize(bounds) {
+  if (!screen || typeof screen.getAllDisplays !== 'function' || !bounds) return null;
+  try {
+    const width = Math.round(Number(bounds.width) || 0);
+    const height = Math.round(Number(bounds.height) || 0);
+    if (!width || !height) return null;
+    const displays = screen.getAllDisplays();
+    return displays.find((display) => display.bounds.width === width && display.bounds.height === height) || null;
+  } catch (e) {
+    return null;
+  }
+}
+
 function getWindowDisplay(win) {
   if (win && !win.isDestroyed()) {
     try {
       const bounds = win.getBounds();
+      if (process.platform === 'linux') {
+        // Wayland 客户端坐标恒为 0,0，用窗口尺寸反推所在输出更可靠。
+        const bySize = findDisplayByWindowSize(bounds)
+          || findDisplayByWindowSize(win.getContentBounds && win.getContentBounds());
+        if (bySize) return bySize;
+      }
       if (screen && typeof screen.getDisplayNearestPoint === 'function') {
         return screen.getDisplayNearestPoint({
           x: Math.round(bounds.x + bounds.width / 2),
@@ -3371,8 +3396,19 @@ function getWindowDisplay(win) {
 
 function getFullscreenTargetDisplay(win) {
   const displays = screen.getAllDisplays();
+  // 全屏时内容尺寸就是输出尺寸，Wayland 没有窗口坐标时这是最可靠的定位方式。
+  if (win && !win.isDestroyed()) {
+    const bySize = findDisplayByWindowSize(win.getContentBounds && win.getContentBounds());
+    if (bySize) return bySize;
+  }
   const remembered = displays.find((display) => String(display.id) === String(windowFullscreenDisplayId));
   return remembered || getWindowDisplay(win);
+}
+
+function syncFullscreenDisplayId(win) {
+  if (!win || win.isDestroyed() || !win.isFullScreen()) return;
+  const display = findDisplayByWindowSize(win.getContentBounds && win.getContentBounds());
+  if (display) windowFullscreenDisplayId = display.id;
 }
 
 function getDisplayArea(display) {
@@ -3383,8 +3419,7 @@ function isPortraitDisplayArea(area) {
   return !!(area && area.height > area.width * 1.12);
 }
 
-function getAdaptiveWindowMinimumSize(display) {
-  const area = getDisplayArea(display);
+function computeMinimumSizeForArea(area) {
   const portrait = isPortraitDisplayArea(area);
   const margin = Math.min(WINDOWED_MARGIN, Math.max(8, Math.round(Math.min(area.width, area.height) * 0.04)));
   const availableWidth = Math.max(360, area.width - margin);
@@ -3395,9 +3430,43 @@ function getAdaptiveWindowMinimumSize(display) {
   };
 }
 
-function updateMainWindowMinimumSize(win) {
+// Wayland 下客户端拿不到窗口的全局坐标，也就无法判断窗口当前落在哪块输出上。
+// 如果按主屏算最小尺寸（960x540），窗口被合成器放到 800x480 的虚拟屏时
+// Chromium 会拒绝把表面缩到 960x540 以下，合成器只能裁掉右下角——表现就是
+// “界面比例异常/被放大”。这里在 Linux 上再按最小的一块输出收紧上限。
+function getLinuxMinimumSizeCap() {
+  if (process.platform !== 'linux') return null;
+  try {
+    const displays = screen.getAllDisplays();
+    let smallest = null;
+    for (const display of displays) {
+      const area = getDisplayArea(display);
+      if (!smallest || area.width * area.height < smallest.width * smallest.height) smallest = area;
+    }
+    if (!smallest) return null;
+    // 留出合成器边框/任务栏余量，保证窗口化尺寸也能落到这块屏内。
+    return {
+      width: Math.max(360, Math.min(MIN_WINDOWED_WIDTH, smallest.width - 60)),
+      height: Math.max(360, Math.min(MIN_WINDOWED_HEIGHT, smallest.height - 60)),
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
+function getAdaptiveWindowMinimumSize(display) {
+  const base = computeMinimumSizeForArea(getDisplayArea(display));
+  const cap = getLinuxMinimumSizeCap();
+  if (!cap) return base;
+  return {
+    width: Math.min(base.width, cap.width),
+    height: Math.min(base.height, cap.height),
+  };
+}
+
+function updateMainWindowMinimumSize(win, displayOverride = null) {
   if (!win || win.isDestroyed()) return;
-  const minimum = getAdaptiveWindowMinimumSize(getWindowDisplay(win));
+  const minimum = getAdaptiveWindowMinimumSize(displayOverride || getWindowDisplay(win));
   win.setMinimumSize(minimum.width, minimum.height);
 }
 
@@ -3417,15 +3486,85 @@ function clampBoundsToDisplayArea(bounds, display) {
   return { x, y, width, height };
 }
 
+function getFullscreenDisplayBounds(display) {
+  const bounds = display && display.bounds;
+  if (!bounds || !(Number(bounds.width) > 0) || !(Number(bounds.height) > 0)) return null;
+  return {
+    x: Math.round(Number(bounds.x) || 0),
+    y: Math.round(Number(bounds.y) || 0),
+    width: Math.round(bounds.width),
+    height: Math.round(bounds.height),
+  };
+}
+
+function ensureFullscreenWindowMatchesDisplay(win) {
+  if (!win || win.isDestroyed() || !win.isFullScreen()) return;
+  const target = getFullscreenDisplayBounds(getWindowDisplay(win));
+  if (!target) return;
+  // 小屏（如 800x480 虚拟扩展屏）上如果窗口表面仍是旧显示器/最小尺寸，
+  // 合成器会直接裁掉右下角，表现就是界面被放大、按钮和播放条被切掉。
+  const current = win.getBounds();
+  if (current.width !== target.width || current.height !== target.height) {
+    win.setBounds(target, false);
+  }
+  const [contentWidth, contentHeight] = win.getContentSize();
+  if (contentWidth !== target.width || contentHeight !== target.height) {
+    try { win.setContentSize(target.width, target.height); } catch (e) {}
+  }
+}
+
+// 某些 Wayland 合成器（含 Hyprland 的 headless 输出）在窗口被移动到更小的
+// 显示器后不会让 Chromium 重新计算表面尺寸：Chromium 仍按旧的最小尺寸绘制，
+// 合成器则按显示器尺寸裁切。这里按“窗口当前所在显示器”重设最小尺寸，并在
+// 内容尺寸与窗口尺寸不一致时强制校正一次。
+function reconcileMainWindowSurface(win) {
+  if (!win || win.isDestroyed()) return;
+  const display = getWindowDisplay(win);
+  const area = getDisplayArea(display);
+  const minimum = getAdaptiveWindowMinimumSize(display);
+  win.setMinimumSize(minimum.width, minimum.height);
+  if (win.isFullScreen()) {
+    ensureFullscreenWindowMatchesDisplay(win);
+    return;
+  }
+  const bounds = win.getBounds();
+  const targetWidth = Math.max(1, Math.min(Math.round(bounds.width), Math.round(area.width)));
+  const targetHeight = Math.max(1, Math.min(Math.round(bounds.height), Math.round(area.height)));
+  const [contentWidth, contentHeight] = win.getContentSize();
+  if (contentWidth === targetWidth && contentHeight === targetHeight) return;
+  if (targetWidth < minimum.width || targetHeight < minimum.height) {
+    win.setMinimumSize(Math.min(minimum.width, targetWidth), Math.min(minimum.height, targetHeight));
+  }
+  try { win.setContentSize(targetWidth, targetHeight); } catch (e) {
+    console.warn('[WindowSurface] content resize failed:', e && e.message || e);
+  }
+}
+
+let mainWindowSurfaceReconcileTimer = null;
+function scheduleMainWindowSurfaceReconcile(win, reason = '') {
+  if (!win || win.isDestroyed()) return;
+  if (mainWindowSurfaceReconcileTimer) clearTimeout(mainWindowSurfaceReconcileTimer);
+  mainWindowSurfaceReconcileTimer = setTimeout(() => {
+    mainWindowSurfaceReconcileTimer = null;
+    if (!win.isDestroyed()) reconcileMainWindowSurface(win);
+  }, 80);
+  if (reason) mainWindowSurfaceReconcileTimer.unref?.();
+}
+
 function ensureMainWindowInsideDisplay(win) {
-  if (!win || win.isDestroyed() || win.isFullScreen()) return;
+  if (!win || win.isDestroyed()) return;
   const display = getWindowDisplay(win);
   updateMainWindowMinimumSize(win);
+  if (win.isFullScreen()) {
+    ensureFullscreenWindowMatchesDisplay(win);
+    return;
+  }
   const current = win.getBounds();
   const next = clampBoundsToDisplayArea(current, display);
   if (next.x !== current.x || next.y !== current.y || next.width !== current.width || next.height !== current.height) {
     win.setBounds(next, false);
   }
+  reconcileMainWindowSurface(win);
 }
 
 function getWindowedBounds(win, displayOverride = null) {
@@ -3493,8 +3632,24 @@ function applyWindowedBounds(win, displayOverride = null) {
   if (!win || win.isDestroyed()) return;
   setMainWindowFullscreenResizeGuard(win, false);
   if (win.isMaximized()) win.unmaximize();
-  updateMainWindowMinimumSize(win);
-  win.setBounds(getWindowedBounds(win, displayOverride), false);
+  const display = displayOverride || getWindowDisplay(win);
+  // 最小尺寸必须按“这扇窗将要落到的那块显示器”来算，否则在小屏上会沿用
+  // 大屏的 960x540，Chromium 拒绝缩小，表面被合成器裁切。
+  updateMainWindowMinimumSize(win, display);
+  // 从全屏退回窗口时优先恢复全屏前的几何：平铺式合成器（Hyprland）会把
+  // 窗口重新按平铺尺寸摆放，若这里换成重新计算的比例尺寸，两边就会不一致
+  // 而被裁切。
+  const restored = windowedBoundsBeforeFullscreen;
+  windowedBoundsBeforeFullscreen = null;
+  let target = null;
+  if (restored) {
+    const area = getDisplayArea(display);
+    if (restored.width <= area.width && restored.height <= area.height) {
+      target = clampBoundsToDisplayArea(restored, display);
+    }
+  }
+  win.setBounds(target || getWindowedBounds(win, display), false);
+  reconcileMainWindowSurface(win);
   sendWindowState(win);
 }
 
@@ -3523,6 +3678,7 @@ function toggleFullscreen(win) {
   const display = getWindowDisplay(win);
   const targetBounds = display && display.bounds;
   windowFullscreenDisplayId = display ? display.id : null;
+  windowedBoundsBeforeFullscreen = win.getBounds();
   windowFullscreenActive = true;
   updateMainWindowMinimumSize(win);
   if (targetBounds && targetBounds.width > 0 && targetBounds.height > 0) {
@@ -5610,8 +5766,19 @@ async function createWindowOnce() {
     events: [],
   };
 
-  const initialBounds = getWindowedBounds();
-  const initialMinimum = getAdaptiveWindowMinimumSize(screen.getPrimaryDisplay());
+  // 窗口会开在当前鼠标所在显示器（多屏合成器的默认行为），因此初始尺寸
+  // 与最小尺寸都必须按那块显示器计算；否则从大屏拖动/转移到 800x480 这类
+  // 小屏后，Chromium 会一直保持 960x540 的表面尺寸，界面被裁切。
+  const initialDisplay = (() => {
+    try {
+      if (screen && typeof screen.getCursorScreenPoint === 'function') {
+        return screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+      }
+    } catch (e) {}
+    return screen.getPrimaryDisplay();
+  })();
+  const initialBounds = getWindowedBounds(null, initialDisplay);
+  const initialMinimum = getAdaptiveWindowMinimumSize(initialDisplay);
   const win = new BrowserWindow({
     ...initialBounds,
     minWidth: initialMinimum.width,
@@ -5763,11 +5930,13 @@ async function createWindowOnce() {
   win.on('blur', () => sendWindowState(win));
   win.on('move', () => {
     updateMainWindowMinimumSize(win);
+    scheduleMainWindowSurfaceReconcile(win, 'move');
     scheduleWindowStateSend(win);
     scheduleWallpaperEngineHostBoundsRestart(win, 'move');
   });
   win.on('resize', () => {
     updateMainWindowMinimumSize(win);
+    scheduleMainWindowSurfaceReconcile(win, 'resize');
     scheduleWindowStateSend(win);
     scheduleWallpaperEngineHostBoundsRestart(win, 'resize');
   });
@@ -5859,6 +6028,21 @@ async function createWindowOnce() {
     setMainWindowFullscreenResizeGuard(win, true);
     sendWindowState(win);
     startMainWindowFullscreenVisibilityGuard(win);
+    // 全屏落到另一块（更小的）显示器时，先把最小尺寸换算成该显示器，
+    // 再按显示器实际分辨率校正表面尺寸，避免 Wayland 裁切。
+    updateMainWindowMinimumSize(win);
+    ensureFullscreenWindowMatchesDisplay(win);
+    syncFullscreenDisplayId(win);
+    setTimeout(() => {
+      if (win.isDestroyed()) return;
+      ensureFullscreenWindowMatchesDisplay(win);
+      syncFullscreenDisplayId(win);
+    }, 120);
+    setTimeout(() => {
+      if (win.isDestroyed()) return;
+      ensureFullscreenWindowMatchesDisplay(win);
+      syncFullscreenDisplayId(win);
+    }, 420);
     // Some Windows builds coalesce the final resize event during native
     // fullscreen. Re-arm the settled debounce from the authoritative event.
     setTimeout(() => scheduleWallpaperEngineHostBoundsRestart(win, 'enter-full-screen'), 40);
