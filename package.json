@@ -11,7 +11,9 @@
     "start": "electron .",
     "build:win": "electron-builder --win nsis",
     "build:win:dir": "electron-builder --win dir",
-    "build:win:internal-beta": "electron-builder --config electron-builder.internal-beta.json --win nsis --publish never"
+    "build:win:internal-beta": "electron-builder --config electron-builder.internal-beta.json --win nsis --publish never",
+    "build:linux": "electron-builder --linux AppImage",
+    "build:linux:dir": "electron-builder --linux dir"
   },
   "build": {
     "appId": "com.mineradio.desktop",
@@ -74,6 +76,23 @@
       "installerHeader": "build/installerHeader.bmp",
       "include": "build/installer.nsh",
       "artifactName": "Mineradio-${version}-Setup.${ext}"
+    },
+    "linux": {
+      "executableName": "Mineradio",
+      "syncDesktopName": true,
+      "icon": "build/icon.png",
+      "category": "AudioVideo",
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "appImage": {
+      "artifactName": "Mineradio-${version}-${arch}.AppImage"
     },
     "publish": [
       {

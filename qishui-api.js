@@ -3340,9 +3340,25 @@ async function fetchQishuiPcTrackV2(trackId, cookieText) {
             got.signedError = signedError && signedError.message || String(signedError);
             return got;
           } catch (getError) {
-            getError.postError = postError && postError.message || String(postError);
-            getError.signedError = signedError && signedError.message || String(signedError);
-            throw getError;
+            // 签名通道与旧通道全部失败（如远程签名服务不可达）时的 SEO 免签兜底。
+            try {
+              const seoPayload = await fetchQishuiSeoTrack(trackId);
+              if (seoPayload && typeof seoPayload === 'object') {
+                seoPayload.mineradioSeoFallback = true;
+                seoPayload.trackV2Errors = [
+                  signedError && signedError.message || String(signedError),
+                  postError && postError.message || String(postError),
+                  getError && getError.message || String(getError),
+                ];
+                return seoPayload;
+              }
+              throw new Error('SEO 回退响应为空');
+            } catch (seoError) {
+              getError.postError = postError && postError.message || String(postError);
+              getError.signedError = signedError && signedError.message || String(signedError);
+              getError.seoError = seoError && seoError.message || String(seoError);
+              throw getError;
+            }
           }
         }
       }
@@ -3353,8 +3369,24 @@ async function fetchQishuiPcTrackV2(trackId, cookieText) {
       try {
         return await fetchQishuiPcTrackV2Get(trackId, cookie);
       } catch (getError) {
-        getError.postError = postError && postError.message || String(postError);
-        throw getError;
+        // SEO 免签接口兜底（issue #452 方案一）：免费歌全曲、VIP 歌服务端只给 30s 试听。
+        // 仅在旧通道也被风控拦下时使用，字段形态与 track_v2 同源，标记来源便于排查。
+        try {
+          const seoPayload = await fetchQishuiSeoTrack(trackId);
+          if (seoPayload && typeof seoPayload === 'object') {
+            seoPayload.mineradioSeoFallback = true;
+            seoPayload.trackV2Errors = [
+              postError && postError.message || String(postError),
+              getError && getError.message || String(getError),
+            ];
+            return seoPayload;
+          }
+          throw new Error('SEO 回退响应为空');
+        } catch (seoError) {
+          getError.postError = postError && postError.message || String(postError);
+          getError.seoError = seoError && seoError.message || String(seoError);
+          throw getError;
+        }
       }
     }
   });

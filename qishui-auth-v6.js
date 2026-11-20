@@ -499,13 +499,19 @@ class QishuiAuthRuntime {
 
   async persistSessionCookies(sessionCookie, generation) {
     const current = {};
-    const cookies = await this.authSession.cookies.get({});
-    for (const cookie of cookies) {
-      const domain = String(cookie.domain || '').replace(/^\./, '').toLowerCase();
-      if (domain === 'qishui.com' || domain.endsWith('.qishui.com')) {
-        current[cookie.name] = cookie.value;
+    // 1) 先尝试从 session 读取（标准路径）
+    try {
+      const cookies = await this.authSession.cookies.get({});
+      for (const cookie of cookies) {
+        const domain = String(cookie.domain || '').replace(/^\./, '').toLowerCase();
+        if (domain === 'qishui.com' || domain.endsWith('.qishui.com')) {
+          current[cookie.name] = cookie.value;
+        }
       }
+    } catch (e) {
+      console.warn('[QishuiAuth] session cookies.get 失败:', e && e.message || e);
     }
+    // 2) 兜底：服务端直接返回的 session_cookie 字符串（Linux 上 session 可能延迟/未落盘）
     Object.assign(current, parseCookieString(sessionCookie));
     if (generation !== this.qrGeneration) return;
     updateConfig({ cookie: buildCookieString(current), msToken: this.msToken });

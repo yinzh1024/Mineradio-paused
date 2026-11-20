@@ -167,7 +167,8 @@ test('playback settles under a wall-clock deadline even when DNS or the response
   const result = await qishui.handleQishuiSongUrl({ id: 'never-connects' }, cookie);
   assert.equal(result.playable, false);
   assert.equal(result.stale, true);
-  assert.deepEqual(deadlines, [3000, 3000, 2500]);
+  // 旧 POST(3000) → 旧 GET(3000) → SEO 免签兜底(8000) → 结算(2500)
+  assert.deepEqual(deadlines, [3000, 3000, 8000, 2500]);
   assert.doesNotMatch(result.message, /Invalid JSON/);
 });
 
