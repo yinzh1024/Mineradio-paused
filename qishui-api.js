@@ -3301,8 +3301,12 @@ async function fetchQishuiPcTrackV2Signed(trackId, cookieText) {
   headers['X-SS-STUB'] = crypto.createHash('md5').update(body).digest('hex').toUpperCase();
   headers['Content-Length'] = Buffer.byteLength(body);
   // 官方 app.ts：key\r\nvalue 行拼接整体签名，返回值按名值对拆开并入 headers
+  // （签名器可能走远程 /sign 后端，返回 Promise，故 await）
   const headerLines = Object.entries(headers).map(([key, value]) => `${key}\r\n${value}`).join('\r\n');
-  const signatureParts = qishuiBdmsSigner.generateHttpSignatureHeaders(url, headerLines, deviceId)
+  const signatureParts = (await qishuiBdmsSigner.generateHttpSignatureHeaders(url, headerLines, deviceId, {
+    method: 'POST',
+    body,
+  }))
     .split('\r\n')
     .filter(part => part.trim());
   for (let i = 0; i + 1 < signatureParts.length; i += 2) {
