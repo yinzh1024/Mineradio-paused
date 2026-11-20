@@ -69,15 +69,40 @@
   // 监听 MPRIS 指令
   function handleAction(action) {
     if (!action || !action.action) return;
+    try {
+      console.log('[MPRIS] 收到指令:', action.action,
+        '| nextTrack:', typeof nextTrack,
+        '| prevTrack:', typeof prevTrack,
+        '| playQueueAt:', typeof playQueueAt,
+        '| playQueue len:', Array.isArray(playQueue) ? playQueue.length : -1,
+        '| currentIdx:', currentIdx);
+    } catch (e) {
+      console.log('[MPRIS] debug err:', e.message);
+    }
     switch (action.action) {
       case 'play':
-        if (typeof togglePlay === 'function') togglePlay(true);
+        if (typeof togglePlay === 'function') {
+          // 兜底：无队列时尝试恢复播放（首页「继续播放」）
+          if ((!playQueue || !playQueue.length || currentIdx < 0) && typeof resumeHomeDashboardPlayback === 'function') {
+            console.log('[MPRIS] 无播放队列，尝试恢复首页播放');
+            resumeHomeDashboardPlayback();
+          } else {
+            togglePlay(true);
+          }
+        }
         break;
       case 'pause':
         if (typeof togglePlay === 'function') togglePlay(false);
         break;
       case 'play-pause':
-        if (typeof togglePlay === 'function') togglePlay();
+        if (typeof togglePlay === 'function') {
+          if ((!playQueue || !playQueue.length || currentIdx < 0) && typeof resumeHomeDashboardPlayback === 'function') {
+            console.log('[MPRIS] 无播放队列，尝试恢复首页播放');
+            resumeHomeDashboardPlayback();
+          } else {
+            togglePlay();
+          }
+        }
         break;
       case 'next':
         if (typeof nextTrack === 'function') nextTrack();
@@ -170,8 +195,58 @@
   coils.start = startHeartbeat;
   coils.onWindowEvent = onWindowEvent     // hooks 由状态机调用
 
+  // ---- MediaSession API：让 Chromium 内置 MPRIS（系统媒体键默认通道）也响应切歌/暂停 ----
+  // 系统 DE（GNOME/KDE/waybar/键盘媒体键）优先控制 Chromium 注册的
+  // org.mpris.MediaPlayer2.chromium.instance*，而非我们的自定义服务；
+  // 不注册 action handler 时该通道只支持 play/pause，next/previous 静默丢弃。
+  function setupMediaSession() {
+    if (!('mediaSession' in navigator)) return;
+    var ms = navigator.mediaSession;
+    var bind = function (action, fn) {
+      try { ms.setActionHandler(action, fn); } catch (_) { /* 不支持的 action 忽略 */ }
+    };
+    bind('play', function () {
+      if ((!playQueue || !playQueue.length || currentIdx < 0) && typeof resumeHomeDashboardPlayback === 'function') {
+        resumeHomeDashboardPlayback();
+      } else if (typeof togglePlay === 'function') togglePlay(true);
+    });
+    bind('pause', function () { if (typeof togglePlay === 'function') togglePlay(false); });
+    bind('previoustrack', function () { if (typeof prevTrack === 'function') prevTrack(true); });
+    bind('nexttrack', function () { if (typeof nextTrack === 'function') nextTrack(true); });
+    bind('seekbackward', function () { if (audio) { try { audio.currentTime = Math.max(0, audio.currentTime - 10); } catch (_) {} } });
+    bind('seekforward', function () { if (audio) { try { audio.currentTime = Math.min(audio.duration || 1e9, audio.currentTime + 10); } catch (_) {} } });
+    try { ms.playbackState = 'none'; } catch (_) {}
+  }
+
+  // 同步 MediaSession 元数据（曲名/歌手/封面）+ 播放状态，系统媒体面板由此取数
+  function syncMediaSessionMetadata() {
+    if (!('mediaSession' in navigator)) return;
+    var s = song();
+    var meta = {};
+    if (s && s.name) {
+      meta.title = String(s.name || s.title || '');
+      if (s.artist) meta.artist = String(s.artist || '');
+      if (s.album) meta.album = String(s.album || '');
+      var cover = coverFor(s);
+      if (cover) meta.artwork = [{ src: cover, sizes: '512x512', type: 'image/jpeg' }];
+    }
+    try {
+      navigator.mediaSession.metadata = meta.title ? new MediaMetadata(meta) : null;
+      navigator.mediaSession.playbackState = playing ? 'playing' : (meta.title ? 'paused' : 'none');
+    } catch (_) {}
+  }
+
+  // push 时顺带同步 MediaSession
+  var origPush = push;
+  push = function (extra) {
+    origPush(extra);
+    syncMediaSessionMetadata();
+  };
+
   // 桌面窗口（有 preload）就绪后自动启用 MPRIS，并启动心跳兜底
   function autoEnable() {
+    setupMediaSession();
+    syncMediaSessionMetadata();
     if (window.desktopWindow) {
       coils.enable();
       coils.start();
