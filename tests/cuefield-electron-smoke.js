@@ -4,7 +4,7 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 const appRoot = path.resolve(__dirname, '..');
-const electron = path.join(appRoot, 'node_modules', 'electron', 'dist', 'electron.exe');
+const electron = path.join(appRoot, 'node_modules', 'electron', 'dist', process.platform === 'win32' ? 'electron.exe' : 'electron');
 
 if (!fs.existsSync(electron)) {
   console.log('[SKIP] Electron executable not installed.');

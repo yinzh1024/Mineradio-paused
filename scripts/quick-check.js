@@ -3555,7 +3555,7 @@ function checkShuffleQueueOrderGuard() {
 }
 
 function electronExecutable() {
-  const exe = path.join(appRoot, 'node_modules', 'electron', 'dist', 'electron.exe');
+  const exe = path.join(appRoot, 'node_modules', 'electron', 'dist', process.platform === 'win32' ? 'electron.exe' : 'electron');
   return fs.existsSync(exe) ? exe : null;
 }
 
