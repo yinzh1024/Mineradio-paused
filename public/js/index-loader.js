@@ -74,6 +74,7 @@
     'js/modules/05-playback/17a-cuefield-bridge-engine.js',
     'js/modules/05-playback/17b-cuefield-source-loop.js',
     'js/modules/05-playback/18-cuefield-automix-integration.js',
+    'js/modules/05-playback/18a-mpris-client.js',
     'js/modules/06-lyrics/00-lyrics-fetch-parse.js',
     'js/modules/06-lyrics/00-built-in-playlists.js',
     'js/modules/06-lyrics/01-playlist-panel-shell.js',

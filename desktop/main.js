@@ -25,6 +25,7 @@ const {
 const { extractKugouAuth } = require('../kugou-api');
 const { qishuiCookieHasLogin } = require('../qishui-api');
 const { clearSpotifyToken } = require('../spotify-api');
+const { start: startMpris, stop: stopMpris, shouldEnable: mprisShouldEnable } = require('./mpris-service');
 
 registerWallpaperEngineScheme(protocol);
 registerLocalMusicScheme(protocol);
@@ -5956,6 +5957,10 @@ if (!gotSingleInstanceLock) {
     } catch (error) {
       console.warn('[Wallpaper Engine] local media protocol unavailable:', error && error.message || error);
     }
+    // 启动 MPRIS 服务（Linux 系统媒体控制）
+    if (mprisShouldEnable()) {
+      startMpris().catch((e) => console.warn('[MPRIS] 启动失败:', e.message));
+    }
     const handleDisplayLayoutChanged = (_event, _display, changedMetrics) => {
       positionDesktopLyricsWindow();
       positionWallpaperWindow(Array.isArray(changedMetrics) ? 'display-metrics-changed' : 'display-layout-changed');
@@ -5992,6 +5997,7 @@ if (!gotSingleInstanceLock) {
     if (appQuitCleanupComplete) return;
     event.preventDefault();
     if (appQuitCleanupPromise) return;
+    stopMpris();
     clearWallpaperEngineCaptureGrant();
     wallpaperEngineLibrary.dispose();
     stopMemoryAutoTimer();

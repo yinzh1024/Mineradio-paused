@@ -143,6 +143,16 @@ contextBridge.exposeInMainWorld('desktopWindow', {
     ipcRenderer.on('desktop-window-state', listener);
     return () => ipcRenderer.removeListener('desktop-window-state', listener);
   },
+
+  // MPRIS 系统媒体控制
+  onMprisAction: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const listener = (_event, payload) => callback(payload || {});
+    ipcRenderer.on('mpris-action', listener);
+    return () => ipcRenderer.removeListener('mpris-action', listener);
+  },
+  updateMprisState: (state) => ipcRenderer.invoke('mpris-update-state', state || {}),
+  getMprisStatus: () => ipcRenderer.invoke('mpris-get-status'),
 });
 
 window.addEventListener('DOMContentLoaded', () => {

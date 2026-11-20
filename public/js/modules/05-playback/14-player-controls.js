@@ -591,6 +591,11 @@ function setPlayIcon(p) {
   document.getElementById('play-icon').innerHTML = p
     ? '<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>'
     : '<path d="M8 5v14l11-7z"/>';
+  // 系统媒体控制（MPRIS）状态同步
+  if (typeof window !== 'undefined' && window.__mineradioMprisClient &&
+      typeof window.__mineradioMprisClient.onPlayStateChange === 'function') {
+    window.__mineradioMprisClient.onPlayStateChange(!!p);
+  }
 }
 function shuffleArrayInPlace(items) {
   for (var i = items.length - 1; i > 0; i--) {
