@@ -1237,6 +1237,26 @@ async function playQueueAt(idx, opts) {
         handlePlaybackUnavailable(song, data);
         return false;
       }
+      // 试听片段检测：汽水未拿到整曲（VIP 曲目缺签名/授权）时回的是 30/60 秒短流，
+      // 服务端不标 trial，这里用曲目元数据时长兜底判定（仅汽水，避免单位差异误判）
+      if (!data.trial && data.url && playbackProvider === 'qishui' && song) {
+        var songSec = Number(song.durationMs || song.dt) > 0
+          ? Number(song.durationMs || song.dt) / 1000
+          : (Number(song.duration) || 0);
+        var playSec = Number(data.duration) || 0;
+        if (songSec > 0 && playSec > 0 && playSec + 5 < songSec) {
+          data.trial = true;
+          data.trialDuration = playSec;
+        }
+      }
+      // 只拿到试听片段：优先自动换到其它已登录平台；换不到再播试听并提示
+      // （已处于换源链内时不再递归，避免把换来的试听也中断）
+      if (data.trial && !opts.fallbackDepth
+          && typeof alternatePlaybackProviders === 'function'
+          && alternatePlaybackProviders(song).length) {
+        var trialFallback = await tryAutoPlaybackFallback(song, data, idx, token, retryPlaybackOpts);
+        if (trialFallback === true) return true;
+      }
       var resolvedQualityText = playbackResolvedQualityText(data, playbackProvider);
       var qualityDowngraded = !!(data && data.level && playbackQualityWasDowngraded(requestedQuality, data.level, playbackProvider));
       if (qualityDowngraded) markPlaybackQualityRuntimeCap(song, playbackProvider, data.level, 'resolved-lower');
@@ -1251,6 +1271,7 @@ async function playQueueAt(idx, opts) {
         else if (data.loggedIn && data.vipLevel === 'vip') txt = '此歌曲需要 SVIP 或购买 · 当前仅播放试听片段';
         else if (data.loggedIn) txt = '此歌曲需 VIP · 当前仅播放试听片段';
         else txt = '当前未登录 · 仅播放试听片段';
+        if (data.trialDuration) txt += '（' + Math.round(data.trialDuration) + ' 秒）';
         document.getElementById('trial-text').textContent = txt;
         var trialLoginBtn = document.getElementById('trial-login-btn');
         if (trialLoginBtn) {

@@ -3435,7 +3435,19 @@ function collectQishuiTrackV2Streams(payload) {
     payload && payload.bitRates
   );
   const fallbackStreams = bitRates.map(item => qishuiStreamFromObject(item)).filter(Boolean);
-  return { track, player, streams, fallbackStreams };
+  // 试听档信息：服务端对「未拿到整曲授权」的请求会回 30/60 秒流，
+  // 同时在 audition_info 里给出试听时长；only_vip_playable 表示仅会员可整曲
+  const audition = pickObject(
+    track.audition_info, track.auditionInfo,
+    payload && payload.audition_info, payload && payload.auditionInfo
+  );
+  const labelInfo = pickObject(
+    track.label_info, track.labelInfo,
+    payload && payload.label_info, payload && payload.labelInfo
+  );
+  const auditionMs = Number(audition && (audition.duration_ms || audition.durationMs || audition.duration)) || 0;
+  const onlyVipPlayable = !!(labelInfo && (labelInfo.only_vip_playable || labelInfo.onlyVipPlayable));
+  return { track, player, streams, fallbackStreams, auditionMs, onlyVipPlayable };
 }
 
 async function resolveQishuiDownloadInfo(trackId, payload, cookieText, membership) {
@@ -3566,7 +3578,13 @@ async function handleQishuiSongUrl(opts, cookieText) {
       const duration = stream.duration || qishuiNormalizeDurationSeconds(track.duration_ms || track.duration || 0);
       const level = qishuiPlaybackLevel(stream.quality, stream.format, stream.bitrate);
       const fullDuration = qishuiNormalizeDurationSeconds(track.duration_ms || track.duration || 0);
-      const trial = !!(duration > 0 && fullDuration > 0 && duration + 5 < fullDuration);
+      let trial = !!(duration > 0 && fullDuration > 0 && duration + 5 < fullDuration);
+      // 服务端把 track.duration 也裁成试听长度时，用 audition_info 兜底判定
+      const auditionSec = qishuiNormalizeDurationSeconds(resolved.auditionMs || 0);
+      if (!trial && duration > 0 && auditionSec > 0 && Math.abs(duration - auditionSec) <= 2
+          && (fullDuration > auditionSec + 10 || resolved.onlyVipPlayable)) {
+        trial = true;
+      }
       return {
         provider: 'qishui',
         playbackMode: 'direct-url',
