@@ -206,8 +206,10 @@ async function musicPost(apiPath, payload, token) {
         const code = envelope && envelope.resultCode || ('HTTP_' + res.status);
         const message = envelope && envelope.resultMessage || '';
         const expired = /token\s*(has\s+)?expired|session\s+expired|token已过期|令牌已过期|登录已过期|会话已过期/i.test(message);
+        // 990000 = 服务端通用错误：token 失效/风控时也回这个，按会话失效处理（可续期/需重登）
+        const sessionInvalid = expired || code === '990000';
         throw Object.assign(new Error(message || 'HUAWEI_API_FAILED'), {
-            code: expired ? 'HUAWEI_SESSION_EXPIRED' : 'HUAWEI_API_FAILED',
+            code: sessionInvalid ? 'HUAWEI_SESSION_INVALID' : 'HUAWEI_API_FAILED',
             resultCode: code,
             status: res.status,
             detail: message,
@@ -280,7 +282,7 @@ async function musicCall(apiPath, payload) {
     try {
         return await musicPost(apiPath, payload, session.token);
     } catch (err) {
-        if (err && err.code === 'HUAWEI_SESSION_EXPIRED' && session.refreshToken) {
+        if (err && (err.code === 'HUAWEI_SESSION_EXPIRED' || err.code === 'HUAWEI_SESSION_INVALID') && session.refreshToken) {
             const refreshed = await refreshHuaweiSession();
             return musicPost(apiPath, payload, refreshed.token);
         }
@@ -504,15 +506,21 @@ async function handleHuaweiStatusWithVerify() {
         }
         return getHuaweiStatus();
     } catch (err) {
-        if (err && err.code === 'HUAWEI_SESSION_EXPIRED' && session.refreshToken) {
+        const sessionInvalid = err && (err.code === 'HUAWEI_SESSION_EXPIRED' || err.code === 'HUAWEI_SESSION_INVALID');
+        if (sessionInvalid && session.refreshToken) {
             try {
                 await refreshHuaweiSession();
+                await validateHuaweiSession(readHuaweiSession());
                 return getHuaweiStatus();
             } catch (_) {}
         }
-        if (err && err.code === 'HUAWEI_SESSION_EXPIRED') {
-            clearHuaweiSession();
-            return Object.assign(getHuaweiStatus(), { loggedIn: false, reauthRequired: true, stale: true, message: '华为音乐登录已过期，请重新登录。' });
+        if (sessionInvalid) {
+            return Object.assign(getHuaweiStatus(), {
+                loggedIn: false,
+                reauthRequired: true,
+                stale: true,
+                message: '华为音乐登录已失效，请重新登录。',
+            });
         }
         // 网络失败不代表会话失效
         return Object.assign(getHuaweiStatus(), { stale: true, warning: err && err.message || String(err) });

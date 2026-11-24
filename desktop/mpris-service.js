@@ -57,7 +57,7 @@ function buildMetadataVariant() {
   if (meta.artist) out['xesam:artist'] = new DBus.Variant('as', [String(meta.artist)]);
   if (meta.album) out['xesam:album'] = new DBus.Variant('s', String(meta.album));
   if (meta.artUrl) out['mpris:artUrl'] = new DBus.Variant('s', String(meta.artUrl));
-  const tid = String(meta.trackId || '');
+  const tid = String(meta.trackId || '').replace(/[^A-Za-z0-9_]/g, '_');
   if (tid) out['mpris:trackid'] = new DBus.Variant('o', OBJECT_PATH + '/track/' + tid);
   const len = Number(meta.length);
   if (isFinite(len) && len > 0) out['mpris:length'] = new DBus.Variant('x', Math.floor(len * 1e6));
