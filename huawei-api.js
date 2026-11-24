@@ -199,6 +199,14 @@ async function musicPost(apiPath, payload, token) {
     try {
         json = text ? JSON.parse(text) : null;
     } catch (_) {
+        // 华为在 token 失效时可能返回纯文本 401（check user authentication failed）
+        if (res.status === 401 || res.status === 403) {
+            throw Object.assign(new Error('华为音乐登录已失效，请重新登录'), {
+                code: 'HUAWEI_SESSION_INVALID',
+                status: res.status,
+                detail: text.slice(0, 200),
+            });
+        }
         throw Object.assign(new Error('HUAWEI_BAD_JSON'), { code: 'HUAWEI_BAD_JSON', status: res.status });
     }
     const envelope = json && json.result;
@@ -207,7 +215,8 @@ async function musicPost(apiPath, payload, token) {
         const message = envelope && envelope.resultMessage || '';
         const expired = /token\s*(has\s+)?expired|session\s+expired|token已过期|令牌已过期|登录已过期|会话已过期/i.test(message);
         // 990000 = 服务端通用错误：token 失效/风控时也回这个，按会话失效处理（可续期/需重登）
-        const sessionInvalid = expired || code === '990000';
+        // HTTP 401/403 同样按会话失效处理
+        const sessionInvalid = expired || code === '990000' || res.status === 401 || res.status === 403;
         throw Object.assign(new Error(message || 'HUAWEI_API_FAILED'), {
             code: sessionInvalid ? 'HUAWEI_SESSION_INVALID' : 'HUAWEI_API_FAILED',
             resultCode: code,
@@ -314,8 +323,13 @@ async function musicCall(apiPath, payload) {
         return await musicPost(apiPath, payload, session.token);
     } catch (err) {
         if (err && (err.code === 'HUAWEI_SESSION_EXPIRED' || err.code === 'HUAWEI_SESSION_INVALID') && session.refreshToken) {
-            const refreshed = await refreshHuaweiSession();
-            return musicPost(apiPath, payload, refreshed.token);
+            try {
+                const refreshed = await refreshHuaweiSession();
+                return await musicPost(apiPath, payload, refreshed.token);
+            } catch (_) {
+                // 续期失败：保留原始会话失效错误，供上层标记 reauthRequired
+                throw err;
+            }
         }
         throw err;
     }
@@ -879,10 +893,12 @@ async function handleHuaweiSongUrl(id, quality, opts) {
                     } catch (_) {}
                 }
             }
+            const sessionInvalid = !!(err && (err.code === 'HUAWEI_SESSION_EXPIRED' || err.code === 'HUAWEI_SESSION_INVALID'));
             return huaweiUnavailable(
-                offline ? '该曲目已在华为音乐下架，正在尝试其他音源' : (message || '华为音乐取流失败'),
-                offline ? 'HUAWEI_CONTENT_OFFLINE' : (err.code || 'HUAWEI_SONG_URL_FAILED'),
-                { reauthRequired: err.code === 'HUAWEI_SESSION_EXPIRED', offline }
+                offline ? '该曲目已在华为音乐下架，正在尝试其他音源'
+                    : (sessionInvalid ? '华为音乐登录已失效，请重新登录' : (message || '华为音乐取流失败')),
+                offline ? 'HUAWEI_CONTENT_OFFLINE' : (sessionInvalid ? 'HUAWEI_SESSION_INVALID' : (err.code || 'HUAWEI_SONG_URL_FAILED')),
+                { reauthRequired: sessionInvalid, offline }
             );
         }
     }

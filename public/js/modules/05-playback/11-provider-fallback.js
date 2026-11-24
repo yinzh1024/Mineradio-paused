@@ -41,6 +41,7 @@ function playbackRestrictionMissingPlaybackKey(data) {
 }
 function playbackRestrictionCategory(song, data) {
   var category = playbackRestrictionRawCategory(song, data);
+  if (data && (data.reauthRequired || data.code === 'HUAWEI_SESSION_INVALID')) return 'login_required';
   var provider = playbackLoginProvider(song);
   var status = platformStatus(provider) || {};
   var mergedStatus = Object.assign({}, status, data || {}, data && data.restriction || {});
@@ -113,6 +114,15 @@ function playbackRestrictionNotice(song, data) {
     return { category: category, title: title, body: body + ' 可以登录会员账号、降低音质或切换到其它音源。', action: 'upgrade', toast: title };
   }
   if (category === 'login_required') {
+    if (providerKey === 'huawei' && data.reauthRequired) {
+      return {
+        category: category,
+        title: '华为音乐登录已失效',
+        body: message || '华为音乐登录已失效，请重新登录。扫码 5 秒即可恢复。',
+        action: 'login',
+        toast: '华为音乐登录已失效'
+      };
+    }
     if (loggedIn && playbackRestrictionMissingPlaybackKey(data)) {
       return {
         category: category,
@@ -756,6 +766,9 @@ function handlePlaybackUnavailable(song, data) {
   showToast(notice.toast || notice.title || playbackRestrictionMessage(song, data));
   showSourceFallbackNotice(notice.title, notice.body);
   if (category === 'login_required') {
+    if (data && data.reauthRequired && typeof showHuaweiReauthBanner === 'function') {
+      showHuaweiReauthBanner(data.message || data.error || '华为音乐登录已失效，请重新登录');
+    }
     setTimeout(function () {
       var modal = document.getElementById('login-modal');
       if (!modal || modal.classList.contains('show')) return;

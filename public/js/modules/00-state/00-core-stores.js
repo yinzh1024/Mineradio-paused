@@ -37,6 +37,7 @@ var qqLoginWasLoggedIn = false;
 var kugouLoginWasLoggedIn = false;
 var qishuiLoginWasLoggedIn = false;
 var huaweiLoginWasLoggedIn = false;
+var huaweiReauthPrompted = false;
 var spotifyLoginWasLoggedIn = false;
 var loginProvider = 'netease';
 var activeAccountProvider = 'netease';

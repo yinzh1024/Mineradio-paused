@@ -72,8 +72,12 @@ Authorization: Digest username=app-music-baseline, nonce=<随机>, created=<ISO8
   `refresh_token`（华为要求 `client_secret`，官方客户端未带，通常返回
   `1101 missing required parameter: client_secret`），失败则标记
   `reauthRequired` 提示重新登录。
-  会话失效的判据：所有带 token 的接口统一返回 `990000 System error!`（搜索免 token 仍可用），
-  遇到时按 `HUAWEI_SESSION_INVALID` 处理
+  会话失效的判据：带 token 的接口返回 `990000 System error!`（部分接口）或 **HTTP 401 纯文本**
+  （`check user authentication failed`），均按 `HUAWEI_SESSION_INVALID` 处理；搜索免 token 仍可用
+- **登录失效的界面处理**：状态变为 `reauthRequired` 时
+  ① 顶部显示持久红色横幅「华为音乐登录已失效，请重新登录」，带「重新登录」按钮；
+  ② 首次检测到失效会自动打开登录弹窗（带 SSO cookie 时可能无需扫码直接恢复）；
+  ③ 播放取流失败也会归为 `login_required`，显示同样提示并弹窗，不再静默失败
 
 ## 前端接入点
 

@@ -452,6 +452,31 @@ function startQishuiLoginStatusAutoRefresh() {
   }, 45000);
 }
 
+function huaweiReauthMessage(info) {
+  return (info && (info.message || info.error)) || '华为音乐登录已失效，请重新登录';
+}
+function showHuaweiReauthBanner(message) {
+  var el = document.getElementById('huawei-reauth-banner');
+  if (!el) return;
+  var text = document.getElementById('huawei-reauth-text');
+  if (text) text.textContent = message || '华为音乐登录已失效，请重新登录';
+  el.classList.add('show');
+}
+function hideHuaweiReauthBanner() {
+  var el = document.getElementById('huawei-reauth-banner');
+  if (el) el.classList.remove('show');
+}
+function reauthorizeHuawei() {
+  if (typeof openProviderLogin === 'function') openProviderLogin('huawei');
+  setTimeout(function () {
+    var modal = document.getElementById('login-modal');
+    if (modal && modal.classList.contains('show') &&
+        typeof openHuaweiWebLogin === 'function' && !huaweiWebLoginBusy) {
+      openHuaweiWebLogin();
+    }
+  }, 260);
+}
+
 function normalizeHuaweiLoginStatus(info) {
   var fallback = { provider: 'huawei', loggedIn: false, configured: true, preview: false, nickname: '华为音乐', userId: '', avatar: '', vipType: 0, vipLevel: 'unknown', isVip: false, isSvip: false, vipLabel: '未知会员状态', stale: false, reauthRequired: false, playbackKeyReady: false, playbackMode: 'direct-url' };
   var loggedIn = !!(info && info.loggedIn);
@@ -478,8 +503,19 @@ async function refreshHuaweiLoginStatus() {
       huaweiPlaylists = [];
       userPlaylists = userPlaylists.filter(function (pl) { return pl.provider !== 'huawei'; });
       playlistCatalogRevision += 1;
-    } else if (huaweiLoginStatus.stale) {
-      showToast('华为音乐登录状态可能已失效');
+      if (huaweiLoginStatus.reauthRequired) {
+        showHuaweiReauthBanner(huaweiReauthMessage(huaweiLoginStatus));
+        if (!huaweiReauthPrompted) {
+          huaweiReauthPrompted = true;
+          setTimeout(function () { reauthorizeHuawei(); }, 800);
+        }
+      } else {
+        hideHuaweiReauthBanner();
+      }
+    } else {
+      hideHuaweiReauthBanner();
+      huaweiReauthPrompted = false;
+      if (huaweiLoginStatus.stale) showToast('华为音乐登录状态可能已失效');
     }
     huaweiLoginWasLoggedIn = !!huaweiLoginStatus.loggedIn;
     if (!hasPlatformLogin(activeAccountProvider)) activeAccountProvider = firstLoggedProvider();

@@ -735,6 +735,10 @@ body.desktop-shell #trial-banner {
   top: 112px
 }
 
+body.desktop-shell #huawei-reauth-banner {
+  top: 112px
+}
+
 body.desktop-shell #ai-depth-chip {
   top: 112px
 }
@@ -7598,6 +7602,70 @@ body.immersive-mode::after {
 }
 
 #trial-banner .close:hover {
+  color: #fff
+}
+
+/* ---------- 华为音乐登录失效提示 ---------- */
+#huawei-reauth-banner {
+  position: fixed;
+  z-index: 9;
+  top: 80px;
+  left: 50%;
+  transform: translateX(-50%) translateY(-10px);
+  background: rgba(229, 73, 63, 0.14);
+  border: 1px solid rgba(229, 73, 63, 0.55);
+  color: #ffd9d6;
+  padding: 10px 18px 10px 14px;
+  border-radius: 12px;
+  font-size: 12px;
+  letter-spacing: .3px;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .5s, transform .5s;
+  max-width: 90vw
+}
+
+#huawei-reauth-banner.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+  pointer-events: auto
+}
+
+#huawei-reauth-banner .ic {
+  flex-shrink: 0;
+  color: #ff8b84
+}
+
+#huawei-reauth-banner .reauth-btn {
+  margin-left: 6px;
+  color: #fff;
+  background: rgba(229, 73, 63, 0.35);
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 11px;
+  transition: background .2s;
+  border: 1px solid rgba(229, 73, 63, 0.55)
+}
+
+#huawei-reauth-banner .reauth-btn:hover {
+  background: rgba(229, 73, 63, 0.55)
+}
+
+#huawei-reauth-banner .close {
+  cursor: pointer;
+  color: rgba(255, 255, 255, 0.5);
+  padding: 2px 4px;
+  margin-left: 4px;
+  transition: color .2s
+}
+
+#huawei-reauth-banner .close:hover {
   color: #fff
 }
 
