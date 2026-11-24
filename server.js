@@ -117,6 +117,10 @@ const {
   handleHuaweiLyric,
   handleHuaweiUserPlaylists,
   handleHuaweiPlaylistTracks,
+  handleHuaweiLikeCheck,
+  handleHuaweiSetLike,
+  handleHuaweiPlaylistAddSong,
+  handleHuaweiCreatePlaylist,
   clearHuaweiLogin,
 } = require('./huawei-api');
 const qishuiQrLogin = require('./qishui-qr-login');
@@ -5632,6 +5636,57 @@ const server = http.createServer(async (req, res) => {
     } catch (err) {
       console.error('[HuaweiUserPlaylists]', err);
       sendJSON(res, { provider: 'huawei', configured: true, loggedIn: false, playlists: [], error: err.message }, 500);
+    }
+    return;
+  }
+
+  if (pn === '/api/huawei/song/like/check') {
+    try {
+      const ids = String(url.searchParams.get('ids') || url.searchParams.get('id') || '')
+        .split(',').map((value) => value.trim()).filter(Boolean);
+      sendJSON(res, await handleHuaweiLikeCheck(ids));
+    } catch (err) {
+      console.error('[HuaweiLikeCheck]', err);
+      sendJSON(res, { provider: 'huawei', liked: {}, error: err.message }, 500);
+    }
+    return;
+  }
+
+  if (pn === '/api/huawei/song/like') {
+    try {
+      const body = req.method === 'POST' ? await readRequestBody(req) : {};
+      const id = String(body.id || url.searchParams.get('id') || '');
+      const liked = String(body.like != null ? body.like : (url.searchParams.get('like') || 'true')) !== 'false';
+      sendJSON(res, await handleHuaweiSetLike(id, liked));
+    } catch (err) {
+      console.error('[HuaweiLike]', err);
+      sendJSON(res, { provider: 'huawei', success: false, error: err.code || err.message }, 500);
+    }
+    return;
+  }
+
+  if (pn === '/api/huawei/playlist/add-song') {
+    try {
+      const body = req.method === 'POST' ? await readRequestBody(req) : {};
+      sendJSON(res, await handleHuaweiPlaylistAddSong(
+        body.pid || body.playlistId || url.searchParams.get('pid') || '',
+        body.id || body.songId || url.searchParams.get('id') || ''
+      ));
+    } catch (err) {
+      console.error('[HuaweiPlaylistAddSong]', err);
+      sendJSON(res, { provider: 'huawei', success: false, error: err.code || err.message }, 500);
+    }
+    return;
+  }
+
+  if (pn === '/api/huawei/playlist/create') {
+    try {
+      const body = req.method === 'POST' ? await readRequestBody(req) : {};
+      const ids = Array.isArray(body.ids) ? body.ids : String(body.ids || body.id || '').split(',').filter(Boolean);
+      sendJSON(res, await handleHuaweiCreatePlaylist(body.name || body.title || body.playListName || '', ids));
+    } catch (err) {
+      console.error('[HuaweiPlaylistCreate]', err);
+      sendJSON(res, { provider: 'huawei', success: false, error: err.code || err.message }, 500);
     }
     return;
   }

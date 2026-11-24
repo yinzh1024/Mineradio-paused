@@ -40,10 +40,12 @@ function updateUserModalUi() {
       vipEl.style.color = 'rgba(69,214,143,0.78)';
     } else if (activeAccountProvider === 'huawei') {
       var hwLogged = !!(st && st.loggedIn);
-      vipEl.textContent = hwLogged
-        ? ('UID: ' + ((st && st.userId) || '-') + '  /  华为音乐会话' + (st && st.stale ? '（待验证）' : ''))
-        : '华为音乐未登录';
-      vipEl.style.color = hwLogged ? 'rgba(229,73,63,0.86)' : 'rgba(229,73,63,0.55)';
+      var hwVip = providerVipLevel('huawei', st);
+      var hwVipLabel = !hwLogged ? '华为音乐未登录'
+        : (hwVip === 'vip' ? '华为音乐 VIP'
+          : (hwVip === 'svip' ? '华为音乐 SVIP' : '华为音乐会话（会员状态未知）'));
+      vipEl.textContent = 'UID: ' + ((st && st.userId) || '-') + '  /  ' + hwVipLabel + (st && st.stale ? '（待验证）' : '');
+      vipEl.style.color = hwLogged ? (hwVip !== 'none' && hwVip !== 'unknown' ? 'rgba(229,73,63,0.92)' : 'rgba(229,73,63,0.72)') : 'rgba(229,73,63,0.55)';
     } else if (activeAccountProvider === 'spotify') {
       var spProduct = st && st.product === 'premium' ? 'Spotify Premium' : (st && st.product ? ('Spotify ' + String(st.product).toUpperCase()) : 'Spotify 方案未知');
       vipEl.textContent = 'ID: ' + ((st && st.userId) || '-') + '  /  ' + spProduct + '  /  可同步歌单和 Liked Songs';

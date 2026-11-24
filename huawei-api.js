@@ -90,6 +90,11 @@ function readHuaweiSession() {
             snsUserID,
             expireTime: normalizeText(doc.expireTime),
             createdAt: Number(doc.createdAt) || 0,
+            accessToken: normalizeText(doc.accessToken),
+            refreshToken: normalizeText(doc.refreshToken),
+            accessTokenExpiresAt: Number(doc.accessTokenExpiresAt) || 0,
+            vipLevel: normalizeText(doc.vipLevel) || 'unknown',
+            vipCheckedAt: Number(doc.vipCheckedAt) || 0,
         };
     } catch (_) {
         return null;
@@ -102,7 +107,12 @@ function writeHuaweiSession(session) {
         token: normalizeText(session && session.token),
         snsUserID: normalizeText(session && session.snsUserID),
         expireTime: normalizeText(session && session.expireTime),
-        createdAt: Date.now(),
+        createdAt: Number(session && session.createdAt) || Date.now(),
+        accessToken: normalizeText(session && session.accessToken),
+        refreshToken: normalizeText(session && session.refreshToken),
+        accessTokenExpiresAt: Number(session && session.accessTokenExpiresAt) || 0,
+        vipLevel: normalizeText(session && session.vipLevel) || 'unknown',
+        vipCheckedAt: Number(session && session.vipCheckedAt) || 0,
     };
     if (!payload.token || !payload.snsUserID) {
         throw Object.assign(new Error('HUAWEI_SESSION_INCOMPLETE'), { code: 'HUAWEI_SESSION_INCOMPLETE' });
@@ -204,6 +214,105 @@ async function musicPost(apiPath, payload, token) {
         });
     }
     return json;
+}
+
+// ── 会话续期（refresh_token → access_token → loginex） ────────
+
+function updateHuaweiSessionMeta(patch) {
+    const session = readHuaweiSession();
+    if (!session) return null;
+    const next = Object.assign({}, session, patch || {});
+    try {
+        return writeHuaweiSession(next);
+    } catch (_) {
+        return session;
+    }
+}
+
+async function refreshHuaweiSession() {
+    const session = readHuaweiSession();
+    if (!session || !session.refreshToken) {
+        throw Object.assign(new Error('HUAWEI_REFRESH_UNAVAILABLE'), { code: 'HUAWEI_REFRESH_UNAVAILABLE' });
+    }
+    const form = new URLSearchParams({
+        grant_type: 'refresh_token',
+        client_id: HUAWEI_CLIENT_ID,
+        refresh_token: session.refreshToken,
+    });
+    const tokenRes = await requestBuffer(HUAWEI_TOKEN_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: form.toString(),
+        timeoutMs: 12000,
+    });
+    let tokenJson = null;
+    try {
+        tokenJson = JSON.parse(tokenRes.buffer.toString('utf8'));
+    } catch (_) {
+        throw Object.assign(new Error('HUAWEI_REFRESH_BAD_JSON'), { code: 'HUAWEI_REFRESH_BAD_JSON' });
+    }
+    const accessToken = normalizeText(tokenJson && tokenJson.access_token);
+    if (!accessToken) {
+        throw Object.assign(new Error('HUAWEI_REFRESH_FAILED'), { code: 'HUAWEI_REFRESH_FAILED' });
+    }
+    const json = await musicPost('/music-odpapp-service/v5/service/userinfo/loginex', { accessToken }, '');
+    const token = normalizeText(json.token);
+    const snsUserID = normalizeText(json.snsUserID);
+    if (!token || !snsUserID) {
+        throw Object.assign(new Error('HUAWEI_REFRESH_INCOMPLETE'), { code: 'HUAWEI_REFRESH_INCOMPLETE' });
+    }
+    return writeHuaweiSession({
+        token,
+        snsUserID,
+        expireTime: normalizeText(json.expireTime),
+        accessToken,
+        refreshToken: normalizeText(tokenJson.refresh_token) || session.refreshToken,
+        accessTokenExpiresAt: Date.now() + Math.max(60, Number(tokenJson.expires_in) || 3600) * 1000,
+        vipLevel: session.vipLevel,
+        vipCheckedAt: session.vipCheckedAt,
+    });
+}
+
+// 带会话的 API 调用：token 过期时自动续期并重试一次
+async function musicCall(apiPath, payload) {
+    const session = readHuaweiSession();
+    if (!session) throw Object.assign(new Error('HUAWEI_LOGIN_REQUIRED'), { code: 'HUAWEI_LOGIN_REQUIRED' });
+    try {
+        return await musicPost(apiPath, payload, session.token);
+    } catch (err) {
+        if (err && err.code === 'HUAWEI_SESSION_EXPIRED' && session.refreshToken) {
+            const refreshed = await refreshHuaweiSession();
+            return musicPost(apiPath, payload, refreshed.token);
+        }
+        throw err;
+    }
+}
+
+// ── 会员状态（用无损取流能力探测） ───────────────────────────
+
+const HUAWEI_VIP_PROBE_TRACKS = ['MqJCfErkcFN0rrFxS'];
+const HUAWEI_VIP_PROBE_TTL_MS = 12 * 60 * 60 * 1000;
+
+async function probeHuaweiVip() {
+    const session = readHuaweiSession();
+    if (!session) return 'unknown';
+    for (const id of HUAWEI_VIP_PROBE_TRACKS) {
+        try {
+            const json = await musicPost('/music-play-service/v3/service/file/bycontentcode', {
+                contentCode: id,
+                contentType: '1',
+                qualityType: '3',
+            }, session.token);
+            const url = normalizeText(json && json.fileURL);
+            const quality = Number(json && json.playQuality) || 0;
+            if (url && isHuaweiResourceUrl(url) && quality === 3) {
+                updateHuaweiSessionMeta({ vipLevel: 'vip', vipCheckedAt: Date.now() });
+                return 'vip';
+            }
+        } catch (_) {}
+    }
+    updateHuaweiSessionMeta({ vipLevel: 'unknown', vipCheckedAt: Date.now() });
+    return 'unknown';
 }
 
 // ── 登录（OAuth PKCE） ───────────────────────────────────────
@@ -325,7 +434,14 @@ async function exchangeHuaweiOAuthCode(code) {
     if (!token || !snsUserID) {
         throw Object.assign(new Error('HUAWEI_MUSIC_SESSION_INCOMPLETE'), { code: 'HUAWEI_MUSIC_SESSION_INCOMPLETE' });
     }
-    return writeHuaweiSession({ token, snsUserID, expireTime: normalizeText(json.expireTime) });
+    return writeHuaweiSession({
+        token,
+        snsUserID,
+        expireTime: normalizeText(json.expireTime),
+        accessToken,
+        refreshToken: normalizeText(tokenJson.refresh_token),
+        accessTokenExpiresAt: Date.now() + Math.max(60, Number(tokenJson.expires_in) || 3600) * 1000,
+    });
 }
 
 async function validateHuaweiSession(session) {
@@ -356,6 +472,8 @@ function getHuaweiStatus() {
             playbackMode: 'direct-url',
         };
     }
+    const vipLevel = normalizeText(session.vipLevel) || 'unknown';
+    const isVip = vipLevel === 'vip';
     return {
         provider: 'huawei',
         configured: true,
@@ -364,11 +482,11 @@ function getHuaweiStatus() {
         userId: session.snsUserID,
         accountKey: session.snsUserID,
         expireTime: session.expireTime,
-        vipLevel: 'unknown',
-        vipType: 0,
-        isVip: false,
+        vipLevel,
+        vipType: isVip ? 1 : 0,
+        isVip,
         isSvip: false,
-        vipLabel: '未知会员状态',
+        vipLabel: isVip ? '华为音乐 VIP' : '未知会员状态',
         playbackKeyReady: true,
         playbackMode: 'direct-url',
     };
@@ -379,8 +497,19 @@ async function handleHuaweiStatusWithVerify() {
     if (!session) return getHuaweiStatus();
     try {
         await validateHuaweiSession(session);
+        const vipStale = !session.vipLevel || session.vipLevel === 'unknown'
+            || !session.vipCheckedAt || Date.now() - session.vipCheckedAt > 12 * 60 * 60 * 1000;
+        if (vipStale) {
+            try { await probeHuaweiVip(); } catch (_) {}
+        }
         return getHuaweiStatus();
     } catch (err) {
+        if (err && err.code === 'HUAWEI_SESSION_EXPIRED' && session.refreshToken) {
+            try {
+                await refreshHuaweiSession();
+                return getHuaweiStatus();
+            } catch (_) {}
+        }
         if (err && err.code === 'HUAWEI_SESSION_EXPIRED') {
             clearHuaweiSession();
             return Object.assign(getHuaweiStatus(), { loggedIn: false, reauthRequired: true, stale: true, message: '华为音乐登录已过期，请重新登录。' });
@@ -529,11 +658,10 @@ function huaweiUnavailable(message, code, extra) {
 
 async function resolveHuaweiPlayback(id, qualityType) {
     const session = readHuaweiSession();
-    const json = await musicPost('/music-play-service/v3/service/file/bycontentcode', {
-        contentCode: id,
-        contentType: '1',
-        qualityType,
-    }, session ? session.token : '');
+    const body = { contentCode: id, contentType: '1', qualityType };
+    const json = session
+        ? await musicCall('/music-play-service/v3/service/file/bycontentcode', body)
+        : await musicPost('/music-play-service/v3/service/file/bycontentcode', body, '');
     return { json, session };
 }
 
@@ -604,6 +732,7 @@ async function handleHuaweiSongUrl(id, quality) {
     const session = readHuaweiSession();
     const preview = /\/preview\//i.test(url) || (!session && auditionEnd > 0);
     const level = usedQualityType === '3' ? 'lossless' : 'standard';
+    if (level === 'lossless') updateHuaweiSessionMeta({ vipLevel: 'vip', vipCheckedAt: Date.now() });
     const value = {
         provider: 'huawei',
         playbackMode: 'direct-url',
@@ -792,6 +921,7 @@ async function handleHuaweiPlaylistTracks(id, offset, limit) {
                 configured: true,
                 loggedIn: true,
                 songs,
+                tracks: songs,
                 rawCount: songs.length,
                 total: all.length,
                 offset,
@@ -817,11 +947,103 @@ async function handleHuaweiPlaylistTracks(id, offset, limit) {
         configured: true,
         loggedIn: true,
         songs,
+        tracks: songs,
         rawCount: songs.length,
+        total: songs.length,
         offset,
         hasMore: songs.length >= limit,
         source: 'huawei-music',
     };
+}
+
+// ── 写操作（喜欢 / 歌单） ───────────────────────────────────
+
+async function huaweiFavoriteExist(token, id) {
+    const url = HUAWEI_API_BASE + '/music-userbehavior-service/v1/service/favorite/simple/exist'
+        + '?contentType=1&contentID=' + encodeURIComponent(id);
+    const res = await requestBuffer(url, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json', 'Authorization': musicAuthHeader(token) },
+        timeoutMs: 8000,
+    });
+    const json = JSON.parse(res.buffer.toString('utf8') || '{}');
+    const exist = normalizeText(json && json.exist);
+    if (exist !== '0' && exist !== '1') throw Object.assign(new Error('HUAWEI_FAVORITE_STATE_UNKNOWN'), { code: 'HUAWEI_FAVORITE_STATE_UNKNOWN' });
+    return exist === '1';
+}
+
+async function handleHuaweiLikeCheck(ids) {
+    const session = readHuaweiSession();
+    const liked = {};
+    if (!session) return { provider: 'huawei', liked, loggedIn: false };
+    const list = (Array.isArray(ids) ? ids : []).map(normalizeText).filter(Boolean).slice(0, 50);
+    await Promise.all(list.map(async (id) => {
+        try {
+            liked[id] = await huaweiFavoriteExist(session.token, id);
+        } catch (_) {}
+    }));
+    return { provider: 'huawei', liked, loggedIn: true };
+}
+
+async function handleHuaweiSetLike(id, liked) {
+    id = normalizeText(id);
+    if (!id) throw Object.assign(new Error('HUAWEI_TRACK_ID_REQUIRED'), { code: 'HUAWEI_TRACK_ID_REQUIRED' });
+    const session = readHuaweiSession();
+    if (!session) throw Object.assign(new Error('HUAWEI_LOGIN_REQUIRED'), { code: 'HUAWEI_LOGIN_REQUIRED' });
+    const target = !!liked;
+    const current = await huaweiFavoriteExist(session.token, id).catch(() => null);
+    if (current === target) return { provider: 'huawei', success: true, liked: target, unchanged: true };
+    await musicCall('/music-userbehavior-service/v1/service/favorite/' + (target ? 'create' : 'delete'), {
+        contentType: '1',
+        contentID: id,
+    });
+    // 回读确认（失败不重试，交给前端提示）
+    let confirmed = null;
+    try {
+        confirmed = await huaweiFavoriteExist(session.token, id);
+    } catch (_) {}
+    return { provider: 'huawei', success: true, liked: confirmed == null ? target : confirmed };
+}
+
+async function handleHuaweiPlaylistAddSong(playlistId, songId) {
+    playlistId = normalizeText(playlistId);
+    songId = normalizeText(songId);
+    if (!playlistId || !songId) throw Object.assign(new Error('HUAWEI_PLAYLIST_ARGS_REQUIRED'), { code: 'HUAWEI_PLAYLIST_ARGS_REQUIRED' });
+    await musicCall('/music-userbehavior-service/v1/service/playlist/song/create', {
+        playListID: playlistId,
+        songCodes: [songId],
+    });
+    return { provider: 'huawei', ok: true, success: true, playlistId, songId };
+}
+
+async function handleHuaweiPlaylistRemoveSong(playlistId, songId) {
+    playlistId = normalizeText(playlistId);
+    songId = normalizeText(songId);
+    if (!playlistId || !songId) throw Object.assign(new Error('HUAWEI_PLAYLIST_ARGS_REQUIRED'), { code: 'HUAWEI_PLAYLIST_ARGS_REQUIRED' });
+    await musicCall('/music-userbehavior-service/v1/service/playlist/song/delete', {
+        playListID: playlistId,
+        songCodes: [songId],
+    });
+    return { provider: 'huawei', ok: true, success: true, playlistId, songId };
+}
+
+async function handleHuaweiCreatePlaylist(name, songIds) {
+    name = normalizeText(name);
+    const ids = (Array.isArray(songIds) ? songIds : []).map(normalizeText).filter(Boolean).slice(0, 200);
+    if (!name || name.length > 60) throw Object.assign(new Error('HUAWEI_PLAYLIST_NAME_INVALID'), { code: 'HUAWEI_PLAYLIST_NAME_INVALID' });
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const createTime = now.getUTCFullYear() + pad(now.getUTCMonth() + 1) + pad(now.getUTCDate())
+        + pad(now.getUTCHours()) + pad(now.getUTCMinutes()) + pad(now.getUTCSeconds());
+    const json = await musicCall('/music-userbehavior-service/v1/service/playlist/create', {
+        createTime,
+        playListName: name,
+        songCodes: ids,
+        shareFlag: '0',
+    });
+    const id = normalizeText(json && (json.playListID || json.playlistID));
+    if (!id) throw Object.assign(new Error('HUAWEI_PLAYLIST_CREATE_UNCONFIRMED'), { code: 'HUAWEI_PLAYLIST_CREATE_UNCONFIRMED' });
+    return { provider: 'huawei', ok: true, success: true, id, playlistId: id, name, count: ids.length };
 }
 
 function clearHuaweiLogin() {
@@ -850,6 +1072,12 @@ module.exports = {
     handleHuaweiLyric,
     handleHuaweiPlaylistTracks,
     handleHuaweiUserPlaylists,
+    handleHuaweiLikeCheck,
+    handleHuaweiSetLike,
+    handleHuaweiPlaylistAddSong,
+    handleHuaweiPlaylistRemoveSong,
+    handleHuaweiCreatePlaylist,
+    refreshHuaweiSession,
     clearHuaweiLogin,
     readHuaweiSession,
     // 测试用

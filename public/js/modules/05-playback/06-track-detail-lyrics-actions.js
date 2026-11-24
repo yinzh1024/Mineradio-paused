@@ -1182,10 +1182,15 @@ var SONG_ACCOUNT_ACTION_ADAPTERS = {
   huawei: {
     provider: 'huawei',
     label: '华为音乐',
-    like: false,
-    collect: false,
-    createPlaylist: false,
-    readOnly: true
+    like: true,
+    collect: true,
+    createPlaylist: true,
+    likeCheckUrl: '/api/huawei/song/like/check',
+    likeCheckParam: 'ids',
+    likeUrl: '/api/huawei/song/like',
+    playlistAddUrl: '/api/huawei/playlist/add-song',
+    playlistCreateUrl: '/api/huawei/playlist/create',
+    playlistTracksUrl: '/api/huawei/playlist/tracks'
   },
   qq: {
     provider: 'qq',
@@ -1222,6 +1227,8 @@ function songAccountIdentityValues(song, provider) {
     if (/^spotify:track:/i.test(uri)) raw.push(uri.split(':').pop());
   } else if (provider === 'qishui') {
     raw = [song.providerSongId, song.trackId, song.track_id, song.id];
+  } else if (provider === 'huawei') {
+    raw = [song.providerSongId, song.id];
   } else {
     raw = [song.id];
   }
@@ -1245,9 +1252,10 @@ function songAccountStateKey(song) {
 }
 function playlistAccountProvider(playlist) {
   var provider = String(playlist && (playlist.provider || playlist.source) || '').toLowerCase();
-  return /^(mineradio|netease|qq|kugou|qishui|spotify)$/.test(provider) ? provider : 'netease';
+  return /^(mineradio|netease|qq|kugou|qishui|huawei|spotify)$/.test(provider) ? provider : 'netease';
 }
 function songAccountLoginStatus(provider) {
+  if (provider === 'huawei') return huaweiLoginStatus || {};
   if (provider === 'spotify') return spotifyLoginStatus || {};
   if (provider === 'qishui') return qishuiLoginStatus || {};
   if (provider === 'kugou') return kugouLoginStatus || {};
