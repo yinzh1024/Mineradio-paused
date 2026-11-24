@@ -140,6 +140,7 @@ function playlistPanelProviderId(provider, id) {
   if (provider === 'qq') return 'qq:' + id;
   if (provider === 'kugou') return 'kugou:' + id;
   if (provider === 'qishui') return 'qishui:' + id;
+  if (provider === 'huawei') return 'huawei:' + id;
   if (provider === 'spotify') return 'spotify:' + id;
   return id;
 }
