@@ -69,3 +69,4 @@ tmp/
 *.png.tmp
 verification/
 screenshots/
+.codegraph/
