@@ -13,6 +13,7 @@ function songSourceLabel(song) {
   if (song.provider === 'spotify' || song.source === 'spotify' || song.type === 'spotify' || song.spotifyId || song.spotifyUri) return 'Spotify';
   if (song.provider === 'qq' || song.source === 'qq' || song.type === 'qq') return 'QQ 音乐';
   if (song.provider === 'qishui' || song.source === 'qishui' || song.type === 'qishui') return '汽水音乐';
+  if (song.provider === 'huawei' || song.source === 'huawei' || song.type === 'huawei') return '华为音乐';
   if (song.provider === 'kugou' || song.source === 'kugou' || song.type === 'kugou' || song.hash || song.audioHash) return '酷狗音乐';
   if (song.type === 'local') return '本地上传';
   if (song.type === 'podcast' || song.source === 'podcast') return '网易云播客';
@@ -117,6 +118,7 @@ function albumDetailMissingText(song) {
   var provider = songProviderKey(song);
   if (provider === 'kugou') return '当前酷狗歌曲缺少稳定专辑详情接口，暂不能按当前音源打开专辑。';
   if (provider === 'qishui') return '汽水当前作为匹配源接入，暂不能按当前音源打开专辑详情。';
+  if (provider === 'huawei') return '华为音乐暂不支持按当前音源打开专辑详情。';
   return '当前歌曲缺少可用专辑 ID，重新搜索或播放新版结果后再打开专辑。';
 }
 function albumCollectionConfig(song) {
@@ -1177,6 +1179,14 @@ var SONG_ACCOUNT_ACTION_ADAPTERS = {
     playlistCreateUrl: '',
     playlistTracksUrl: '/api/qishui/playlist/tracks'
   },
+  huawei: {
+    provider: 'huawei',
+    label: '华为音乐',
+    like: false,
+    collect: false,
+    createPlaylist: false,
+    readOnly: true
+  },
   qq: {
     provider: 'qq',
     label: 'QQ 音乐',
@@ -1192,6 +1202,7 @@ function songAccountProvider(song) {
   if (song.provider === 'spotify' || song.source === 'spotify' || song.type === 'spotify' || song.spotifyId || song.spotifyUri) return 'spotify';
   if (song.provider === 'qq' || song.source === 'qq' || song.type === 'qq') return 'qq';
   if (song.provider === 'qishui' || song.source === 'qishui' || song.type === 'qishui') return 'qishui';
+  if (song.provider === 'huawei' || song.source === 'huawei' || song.type === 'huawei') return 'huawei';
   if (song.provider === 'kugou' || song.source === 'kugou' || song.type === 'kugou' || song.hash || song.audioHash) return 'kugou';
   return 'netease';
 }

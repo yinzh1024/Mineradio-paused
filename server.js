@@ -110,6 +110,15 @@ const {
   handleQishuiLyric,
   handleQishuiSongUrl,
 } = require('./qishui-api');
+const {
+  handleHuaweiStatusWithVerify,
+  handleHuaweiSearch,
+  handleHuaweiSongUrl,
+  handleHuaweiLyric,
+  handleHuaweiUserPlaylists,
+  handleHuaweiPlaylistTracks,
+  clearHuaweiLogin,
+} = require('./huawei-api');
 const qishuiQrLogin = require('./qishui-qr-login');
 const { clearSpotifyToken } = require('./spotify-api');
 const {
@@ -5554,6 +5563,91 @@ const server = http.createServer(async (req, res) => {
     } catch (err) {
       console.error('[QishuiLyric]', err);
       sendJSON(res, { provider: 'qishui', error: err.message, lyric: '', tlyric: '' }, 500);
+    }
+    return;
+  }
+
+  if (pn === '/api/huawei/status' || pn === '/api/huawei/login/status') {
+    try {
+      sendJSON(res, await handleHuaweiStatusWithVerify());
+    } catch (err) {
+      console.error('[HuaweiStatus]', err);
+      sendJSON(res, { provider: 'huawei', configured: true, loggedIn: false, error: err.message }, 500);
+    }
+    return;
+  }
+
+  if (pn === '/api/huawei/logout') {
+    try {
+      sendJSON(res, clearHuaweiLogin());
+    } catch (err) {
+      console.error('[HuaweiLogout]', err);
+      sendJSON(res, { provider: 'huawei', ok: false, error: err.message }, 500);
+    }
+    return;
+  }
+
+  if (pn === '/api/huawei/search') {
+    try {
+      const kw = url.searchParams.get('keywords') || url.searchParams.get('q') || '';
+      const limit = Math.max(1, Math.min(30, parseInt(url.searchParams.get('limit') || '10', 10) || 10));
+      const offset = Math.max(0, parseInt(url.searchParams.get('offset') || '0', 10) || 0);
+      sendJSON(res, await handleHuaweiSearch(kw, limit, offset));
+    } catch (err) {
+      console.error('[HuaweiSearch]', err);
+      sendJSON(res, { provider: 'huawei', configured: true, songs: [], error: err.message }, 500);
+    }
+    return;
+  }
+
+  if (pn === '/api/huawei/song/url') {
+    try {
+      sendJSON(res, await handleHuaweiSongUrl(
+        url.searchParams.get('id') || url.searchParams.get('trackId') || '',
+        url.searchParams.get('quality') || url.searchParams.get('level') || ''
+      ));
+    } catch (err) {
+      console.error('[HuaweiSongUrl]', err);
+      sendJSON(res, { provider: 'huawei', url: '', playable: false, error: err.message }, 500);
+    }
+    return;
+  }
+
+  if (pn === '/api/huawei/lyric') {
+    try {
+      const id = url.searchParams.get('id') || url.searchParams.get('trackId') || '';
+      sendJSON(res, await handleHuaweiLyric(id));
+    } catch (err) {
+      console.error('[HuaweiLyric]', err);
+      sendJSON(res, { provider: 'huawei', lyric: '', yrc: '', tlyric: '', error: err.message }, 500);
+    }
+    return;
+  }
+
+  if (pn === '/api/huawei/user/playlists') {
+    try {
+      const limit = Math.max(1, Math.min(200, parseInt(url.searchParams.get('limit') || '50', 10) || 50));
+      const offset = Math.max(0, parseInt(url.searchParams.get('offset') || '0', 10) || 0);
+      sendJSON(res, await handleHuaweiUserPlaylists(limit, offset));
+    } catch (err) {
+      console.error('[HuaweiUserPlaylists]', err);
+      sendJSON(res, { provider: 'huawei', configured: true, loggedIn: false, playlists: [], error: err.message }, 500);
+    }
+    return;
+  }
+
+  if (pn === '/api/huawei/playlist/tracks') {
+    try {
+      const limit = Math.max(1, Math.min(100, parseInt(url.searchParams.get('limit') || '50', 10) || 50));
+      const offset = Math.max(0, parseInt(url.searchParams.get('offset') || '0', 10) || 0);
+      sendJSON(res, await handleHuaweiPlaylistTracks(
+        url.searchParams.get('id') || '',
+        offset,
+        limit
+      ));
+    } catch (err) {
+      console.error('[HuaweiPlaylistTracks]', err);
+      sendJSON(res, { provider: 'huawei', songs: [], error: err.message }, 500);
     }
     return;
   }

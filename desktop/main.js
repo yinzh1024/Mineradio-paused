@@ -139,6 +139,7 @@ const QQ_LOGIN_PARTITION = 'persist:mineradio-qqmusic-login';
 const QQ_LOGIN_URL = 'https://y.qq.com/n/ryqq/profile';
 const QQ_LOGIN_FALLBACK_URL = 'https://y.qq.com/';
 const KUGOU_LOGIN_PARTITION = 'persist:mineradio-kugou-login';
+const HUAWEI_LOGIN_PARTITION = 'persist:mineradio-huawei-login';
 const KUGOU_LOGIN_URL = 'https://www.kugou.com/';
 const KUGOU_LOGIN_WARMUP_URL = 'https://www.kugou.com/newuc/user/uc/type=edit';
 const SPOTIFY_LOGIN_PARTITION = 'persist:mineradio-spotify-login';
@@ -3317,6 +3318,142 @@ async function clearSpotifyMusicLoginSession() {
   return { ok: true, provider: 'spotify' };
 }
 
+async function clearHuaweiMusicLoginSession() {
+  const huaweiApi = require('../huawei-api');
+  const cookieSession = session.fromPartition(HUAWEI_LOGIN_PARTITION);
+  await cookieSession.clearStorageData({
+    storages: ['cookies', 'localstorage', 'indexdb', 'cachestorage'],
+  });
+  huaweiApi.clearHuaweiLogin();
+  return { ok: true, provider: 'huawei' };
+}
+
+// 华为音乐登录：华为账号 OAuth（PKCE）在应用内窗口完成，回调是自定义 scheme hms://。
+// 自定义 scheme 不会真正发起网络请求，用 webRequest 拦截最可靠（will-redirect 作为兜底）。
+async function openHuaweiMusicLoginWindow(owner) {
+  const huaweiApi = require('../huawei-api');
+  const attempt = huaweiApi.createHuaweiOAuthAttempt();
+  const cookieSession = session.fromPartition(HUAWEI_LOGIN_PARTITION);
+
+  return new Promise((resolve) => {
+    let settled = false;
+    let timeoutTimer = null;
+    let redirectHandler = null;
+
+    const loginWindow = new BrowserWindow({
+      width: 900,
+      height: 760,
+      minWidth: 760,
+      minHeight: 560,
+      parent: owner && !owner.isDestroyed() ? owner : undefined,
+      modal: false,
+      show: false,
+      autoHideMenuBar: true,
+      title: '华为音乐登录',
+      backgroundColor: '#111111',
+      icon: APP_ICON,
+      webPreferences: {
+        partition: HUAWEI_LOGIN_PARTITION,
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+      },
+    });
+
+    const detachInterception = () => {
+      if (redirectHandler) {
+        try { cookieSession.webRequest.onBeforeRequest(null); } catch (_) {}
+        redirectHandler = null;
+      }
+    };
+
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      if (timeoutTimer) clearTimeout(timeoutTimer);
+      detachInterception();
+      if (loginWindow && !loginWindow.isDestroyed()) loginWindow.destroy();
+      resolve(result);
+    };
+
+    const handleCallback = async (rawUrl) => {
+      const accepted = huaweiApi.acceptHuaweiOAuthCallback(rawUrl);
+      if (!accepted.ok) {
+        finish({ ok: false, provider: 'huawei', error: accepted.error, message: accepted.message });
+        return;
+      }
+      try {
+        const saved = await huaweiApi.exchangeHuaweiOAuthCode(accepted.code);
+        finish({ ok: true, provider: 'huawei', userId: saved.snsUserID });
+      } catch (error) {
+        finish({
+          ok: false,
+          provider: 'huawei',
+          error: error && (error.code || error.message) || 'HUAWEI_LOGIN_FAILED',
+          message: '华为音乐登录失败：' + (error && error.message || '未知错误'),
+        });
+      }
+    };
+
+    redirectHandler = (details, callback) => {
+      const target = details && details.url || '';
+      if (huaweiApi.isHuaweiCallbackUrl(target)) {
+        callback({ cancel: true });
+        handleCallback(target);
+        return;
+      }
+      callback({ cancel: false });
+    };
+    try {
+      cookieSession.webRequest.onBeforeRequest({ urls: ['hms://*'] }, redirectHandler);
+    } catch (error) {
+      console.warn('Huawei login webRequest interception failed:', error && error.message);
+    }
+
+    const onNavigation = (event, rawUrl) => {
+      if (!huaweiApi.isHuaweiCallbackUrl(rawUrl)) return;
+      event.preventDefault();
+      handleCallback(rawUrl);
+    };
+    loginWindow.webContents.on('will-redirect', onNavigation);
+    loginWindow.webContents.on('will-navigate', onNavigation);
+
+    loginWindow.webContents.setWindowOpenHandler(({ url }) => {
+      if (huaweiApi.isHuaweiLoginUrl(url)) {
+        loginWindow.loadURL(url).catch((e) => console.warn('Huawei login popup navigation failed:', e.message));
+      }
+      return { action: 'deny' };
+    });
+
+    loginWindow.webContents.on('did-fail-load', (event, code, description, url, isMainFrame) => {
+      if (!isMainFrame) return;
+      if (/^hms:/i.test(String(url || ''))) return;
+      console.warn('Huawei login page load failed:', code, description);
+    });
+
+    loginWindow.once('ready-to-show', () => {
+      if (loginWindow && !loginWindow.isDestroyed()) loginWindow.show();
+    });
+
+    loginWindow.on('closed', () => {
+      if (!settled) {
+        settled = true;
+        if (timeoutTimer) clearTimeout(timeoutTimer);
+        detachInterception();
+        resolve({ ok: false, provider: 'huawei', error: 'HUAWEI_LOGIN_WINDOW_CLOSED', message: '登录窗口已关闭' });
+      }
+    });
+
+    timeoutTimer = setTimeout(() => {
+      finish({ ok: false, provider: 'huawei', error: 'HUAWEI_LOGIN_TIMEOUT', message: '华为音乐登录超时，请重试。' });
+    }, 10 * 60 * 1000);
+
+    loginWindow.loadURL(attempt.url).catch((error) => {
+      finish({ ok: false, provider: 'huawei', error: 'HUAWEI_LOGIN_LOAD_FAILED', message: error && error.message || '无法打开华为登录页' });
+    });
+  });
+}
+
 function loginEasterEggLockedResult() {
   return {
     ok: false,
@@ -3351,6 +3488,7 @@ async function clearAllProviderLoginState(reason) {
     clearKugouMusicLoginSession(),
     clearQishuiMusicLoginSession(),
     clearSpotifyMusicLoginSession(),
+    clearHuaweiMusicLoginSession(),
   ]);
   const failed = results.find((result) => result.status === 'rejected');
   if (failed) throw failed.reason;
@@ -5036,6 +5174,15 @@ ipcMain.handle('qishui-music-clear-login', async () => {
   return clearQishuiMusicLoginSession();
 });
 
+ipcMain.handle('huawei-music-open-login', async (event) => {
+  if (!loginEasterEggGate.isUnlocked()) return loginEasterEggLockedResult();
+  return openHuaweiMusicLoginWindow(getSenderWindow(event));
+});
+
+ipcMain.handle('huawei-music-clear-login', async () => {
+  return clearHuaweiMusicLoginSession();
+});
+
 ipcMain.handle('mineradio-open-update-page', async (event, value) => {
   try {
     if (!isTrustedMainWindowIpc(event)) return { ok: false, error: 'UNTRUSTED_SENDER' };
@@ -5204,6 +5351,7 @@ function configureLocalServerEnvironment(port) {
     process.env.QISHUI_OAUTH_CONFIG_FILE = path.join(STABLE_USER_DATA_PATH, '.qishui-oauth.json');
   }
   process.env.SPOTIFY_TOKEN_FILE = path.join(STABLE_USER_DATA_PATH, '.spotify-token.json');
+  process.env.MINERADIO_HUAWEI_SESSION_FILE = path.join(STABLE_USER_DATA_PATH, '.huawei-session.json');
   if (!process.env.SPOTIFY_CONFIG_FILE && !process.env.MINERADIO_SPOTIFY_CONFIG_FILE) {
     process.env.SPOTIFY_CONFIG_FILE = path.join(STABLE_USER_DATA_PATH, '.spotify-credentials.json');
   }
@@ -5220,6 +5368,7 @@ const APP_OWNED_MIGRATION_FILES = [
   '.qishui-qr-login.json',
   '.spotify-token.json',
   '.spotify-credentials.json',
+  '.huawei-session.json',
   'current-fx-autosave.json',
   'desktop-behavior.json',
   'cuefield-feedback.jsonl',

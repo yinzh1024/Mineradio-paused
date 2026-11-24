@@ -29,6 +29,9 @@ function lyricEndpointForSong(songOrId) {
   if (provider === 'qishui') {
     return '/api/qishui/lyric?id=' + encodeURIComponent(song.id || song.providerSongId || '');
   }
+  if (provider === 'huawei') {
+    return '/api/huawei/lyric?id=' + encodeURIComponent(song.id || song.providerSongId || '');
+  }
   if (provider === 'spotify') {
     return '/api/spotify/lyric?id=' + encodeURIComponent(song.id || song.providerSongId || song.spotifyId || '');
   }

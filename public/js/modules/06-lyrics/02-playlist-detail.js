@@ -116,13 +116,13 @@ function bindMiniQueueLazyRender() {
 }
 function normalizePlaylistProvider(provider) {
   if (provider === 'mineradio') return 'mineradio';
-  if (provider === 'qq' || provider === 'kugou' || provider === 'qishui' || provider === 'spotify') return provider;
+  if (provider === 'qq' || provider === 'kugou' || provider === 'qishui' || provider === 'huawei' || provider === 'spotify') return provider;
   return 'netease';
 }
 function playlistProviderLabel(provider) {
   provider = normalizePlaylistProvider(provider);
   if (provider === 'mineradio') return 'MR';
-  return provider === 'qq' ? 'QQ' : (provider === 'kugou' ? 'KG' : (provider === 'qishui' ? 'QS' : (provider === 'spotify' ? 'SP' : 'NE')));
+  return provider === 'qq' ? 'QQ' : (provider === 'kugou' ? 'KG' : (provider === 'qishui' ? 'QS' : (provider === 'huawei' ? 'HW' : (provider === 'spotify' ? 'SP' : 'NE'))));
 }
 function playlistProviderName(provider) {
   provider = normalizePlaylistProvider(provider);
@@ -271,6 +271,7 @@ function playlistTracksEndpoint(provider, id, params) {
   if (provider === 'qq') return '/api/qq/playlist/tracks?' + query;
   if (provider === 'kugou') return '/api/kugou/playlist/tracks?' + query;
   if (provider === 'qishui') return '/api/qishui/playlist/tracks?' + query;
+  if (provider === 'huawei') return '/api/huawei/playlist/tracks?' + query;
   if (provider === 'spotify') return '/api/spotify/playlist/tracks?' + query;
   return '/api/playlist/tracks?' + query;
 }
@@ -556,9 +557,9 @@ function playlistPanelBuildVirtualEntries() {
   if (playlistPanelVirtualCache.revision === playlistCatalogRevision &&
       playlistPanelVirtualCache.detailKey === playlistPanelDetailState.key &&
       playlistPanelVirtualCache.detailSig === detailSig) return playlistPanelVirtualCache;
-  var labels = { mineradio: 'Mineradio 内置歌单', netease: '网易云歌单', qq: 'QQ 音乐歌单', kugou: '酷狗音乐歌单', qishui: '汽水音乐歌单', spotify: 'Spotify 歌单' };
-  var order = ['mineradio', 'netease', 'qq', 'kugou', 'qishui', 'spotify'];
-  var groups = { mineradio: [], netease: [], qq: [], kugou: [], qishui: [], spotify: [] };
+  var labels = { mineradio: 'Mineradio 内置歌单', netease: '网易云歌单', qq: 'QQ 音乐歌单', kugou: '酷狗音乐歌单', qishui: '汽水音乐歌单', huawei: '华为音乐歌单', spotify: 'Spotify 歌单' };
+  var order = ['mineradio', 'netease', 'qq', 'kugou', 'qishui', 'huawei', 'spotify'];
+  var groups = { mineradio: [], netease: [], qq: [], kugou: [], qishui: [], huawei: [], spotify: [] };
   userPlaylists.forEach(function (pl, sourceIndex) {
     var key = playlistPanelGroupKey(pl);
     if (!groups[key]) groups[key] = [];

@@ -83,6 +83,8 @@ contextBridge.exposeInMainWorld('desktopWindow', {
   openKugouMusicLogin: (options) => ipcRenderer.invoke('kugou-music-open-login', options || {}),
   clearKugouMusicLogin: () => ipcRenderer.invoke('kugou-music-clear-login'),
   clearQishuiMusicLogin: () => ipcRenderer.invoke('qishui-music-clear-login'),
+  openHuaweiMusicLogin: () => ipcRenderer.invoke('huawei-music-open-login'),
+  clearHuaweiMusicLogin: () => ipcRenderer.invoke('huawei-music-clear-login'),
   openUpdatePage: (url) => ipcRenderer.invoke('mineradio-open-update-page', String(url || '')),
   restartApp: () => ipcRenderer.invoke('mineradio-restart-app'),
   configureGlobalHotkeys: (bindings) => ipcRenderer.invoke('mineradio-hotkeys-configure-global', bindings || []),

@@ -31,6 +31,7 @@ function normalizePlaybackProvider(provider) {
   if (provider === 'qq') return 'qq';
   if (provider === 'kugou') return 'kugou';
   if (provider === 'qishui') return 'qishui';
+  if (provider === 'huawei') return 'huawei';
   if (provider === 'spotify') return 'spotify';
   return 'netease';
 }
@@ -69,6 +70,10 @@ function playbackQualityLabel(value, provider) {
   value = normalizePlaybackQualityForProvider(value, provider);
   if (provider === 'spotify') return 'Spotify 匹配源';
   if (provider === 'qishui') return '汽水音质';
+  if (provider === 'huawei') {
+    if (value === 'lossless') return '华为无损 FLAC';
+    return '华为标准 MP3';
+  }
   if (provider === 'qq') {
     if (value === 'hires') return 'Hi-Res FLAC';
     if (value === 'lossless') return '无损 FLAC';
@@ -238,7 +243,7 @@ function updatePlaybackQualityUi() {
   var canUseSvip = provider === 'netease' && hasProviderSvip('netease', loginStatus);
   var displayQuality = provider === 'netease' && effectiveQuality === 'jymaster' && !canUseSvip ? 'hires' : effectiveQuality;
   if (label) label.textContent = playbackQualityShortLabel(displayQuality, provider);
-  var qualityProviderTitle = provider === 'spotify' ? 'Spotify 匹配源: ' : (provider === 'qishui' ? '汽水音质: ' : (provider === 'qq' ? 'QQ 音质: ' : (provider === 'kugou' ? '酷狗音质: ' : '网易云音质: ')));
+  var qualityProviderTitle = provider === 'spotify' ? 'Spotify 匹配源: ' : (provider === 'qishui' ? '汽水音质: ' : (provider === 'huawei' ? '华为音质: ' : (provider === 'qq' ? 'QQ 音质: ' : (provider === 'kugou' ? '酷狗音质: ' : '网易云音质: '))));
   if (btn) btn.title = qualityProviderTitle + playbackQualityLabel(displayQuality, provider) +
     (provider === 'netease' && currentQuality === 'jymaster' && !canUseSvip ? ' · 超清母带需网易云 SVIP' : '');
   if (btn && runtimeCapQuality) btn.title += ' | 当前歌曲最高: ' + playbackQualityLabel(runtimeCapQuality, provider);

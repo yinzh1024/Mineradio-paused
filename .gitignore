@@ -29,6 +29,8 @@ win-unpacked/
 spotify-credentials.json
 .spotify-token.json
 spotify-token.json
+.huawei-session.json
+huawei-session.json
 listen-sync-journal.json
 login-easter-egg.json
 login-easter-egg-state.json

@@ -630,6 +630,9 @@ async function resolveAlbumGaplessPlaybackData(song) {
   if (playbackProvider === 'qishui') {
     return apiJson('/api/qishui/song/url?id=' + encodeURIComponent(song.id || song.providerSongId || '') + qqPlaybackEvidenceQuery(song) + qualityParam, { timeoutMs: 15000 });
   }
+  if (playbackProvider === 'huawei') {
+    return apiJson('/api/huawei/song/url?id=' + encodeURIComponent(song.id || song.providerSongId || '') + qualityParam, { timeoutMs: 15000 });
+  }
   if (playbackProvider === 'spotify') {
     return apiJson('/api/spotify/song/url?id=' + encodeURIComponent(song.id || song.providerSongId || song.spotifyId || '') +
       '&spotifyId=' + encodeURIComponent(song.spotifyId || '') +
@@ -1159,6 +1162,7 @@ async function playQueueAt(idx, opts) {
       var isQQPlayback = playbackProvider === 'qq';
       var isKugouPlayback = playbackProvider === 'kugou';
       var isQishuiPlayback = playbackProvider === 'qishui';
+      var isHuaweiPlayback = playbackProvider === 'huawei';
       var isSpotifyPlayback = playbackProvider === 'spotify';
       var requestedQuality = normalizePlaybackQualityForProvider(opts.qualityOverride || getProviderPlaybackQuality(playbackProvider), playbackProvider);
       if (playbackProvider === 'netease' && requestedQuality === 'jymaster' && !hasProviderSvip('netease', loginStatus)) requestedQuality = 'hires';
@@ -1188,6 +1192,8 @@ async function playQueueAt(idx, opts) {
           qualityParam, { timeoutMs: 20000 });
       } else if (isQishuiPlayback) {
         data = await apiJson('/api/qishui/song/url?id=' + encodeURIComponent(song.id || song.providerSongId || '') + qqPlaybackEvidenceQuery(song) + qualityParam, { timeoutMs: 15000 });
+      } else if (isHuaweiPlayback) {
+        data = await apiJson('/api/huawei/song/url?id=' + encodeURIComponent(song.id || song.providerSongId || '') + qualityParam, { timeoutMs: 15000 });
       } else if (isSpotifyPlayback) {
         data = await apiJson('/api/spotify/song/url?id=' + encodeURIComponent(song.id || song.providerSongId || song.spotifyId || '') +
           '&spotifyId=' + encodeURIComponent(song.spotifyId || '') +
@@ -1337,6 +1343,30 @@ async function playQueueAt(idx, opts) {
       if (!albumGaplessHandoff) audio.src = proxyAudioUrl;
       audio.__mineradioQueueItemKey = queueItemKey(song);
       audio.__mineradioTrackSwitchToken = token;
+      // 试听片段兜底：媒体真实时长明显短于曲目元数据 → 提示（部分平台 30s 预览
+      // 既没有 /preview/ 标记，回包时长也被裁短，只能靠解码后的 metadata 判断）
+      if (!albumGaplessHandoff) {
+        var trialDurationProbe = function () {
+          if (token !== trackSwitchToken) return;
+          var mediaDuration = Number(audio && audio.duration) || 0;
+          var metaDuration = Number(song && song.duration) || 0;
+          if (!metaDuration) {
+            var metaMs = Number(song && (song.durationMs || song.dt)) || 0;
+            if (metaMs > 0) metaDuration = metaMs / 1000;
+          }
+          if (mediaDuration <= 0 || metaDuration <= 0 || mediaDuration + 5 >= metaDuration) return;
+          song.trial = true;
+          song.trialDuration = mediaDuration;
+          data.trial = true;
+          data.trialDuration = mediaDuration;
+          var trialText = document.getElementById('trial-text');
+          var trialBanner = document.getElementById('trial-banner');
+          if (trialText) trialText.textContent = '仅拿到试听片段（' + Math.round(mediaDuration) + ' 秒 / 完整 ' + Math.round(metaDuration) + ' 秒）' + (data.loggedIn ? '' : ' · 当前未登录');
+          if (trialBanner) trialBanner.classList.add('show');
+          if (typeof updateControlTrackInfo === 'function') updateControlTrackInfo(song);
+        };
+        audio.addEventListener('loadedmetadata', trialDurationProbe, { once: true });
+      }
       updatePlaybackProgressUi();
       audio.onended = function () {
         if (token !== trackSwitchToken) return;

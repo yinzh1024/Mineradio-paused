@@ -1,7 +1,7 @@
 var loginRefreshRequestSeq = 0;
 var loginWorkflowDrag = null;
 var LOGIN_WORKFLOW_CONNECTION_STORE_KEY = 'mineradio-login-workflow-connections-v1';
-var LOGIN_WORKFLOW_PROVIDERS = ['netease', 'qq', 'kugou', 'qishui'];
+var LOGIN_WORKFLOW_PROVIDERS = ['netease', 'qq', 'kugou', 'qishui', 'huawei'];
 var loginWorkflowPendingProvider = '';
 var loginWorkflowVerifiedSession = {};
 var loginProviderPointer = null;
@@ -20,17 +20,18 @@ function isLoginRefreshCurrent(provider, seq) {
 }
 
 function normalizeLoginProviderKey(provider) {
-  return provider === 'qq' ? 'qq' : (provider === 'kugou' ? 'kugou' : (provider === 'qishui' ? 'qishui' : 'netease'));
+  return provider === 'qq' ? 'qq' : (provider === 'kugou' ? 'kugou' : (provider === 'qishui' ? 'qishui' : (provider === 'huawei' ? 'huawei' : 'netease')));
 }
 function loginProviderSupportsCookieMode(provider) {
   provider = normalizeLoginProviderKey(provider);
-  return provider !== 'spotify' && provider !== 'qishui';
+  return provider !== 'spotify' && provider !== 'qishui' && provider !== 'huawei';
 }
 function loginProviderOfficialModeText(provider) {
   provider = normalizeLoginProviderKey(provider);
   if (provider === 'spotify') return { title: 'OAuth', sub: '弹出 Spotify 授权窗口' };
   if (provider === 'qishui') return { title: '扫码', sub: '使用抖音 App 官方授权' };
   if (provider === 'kugou') return { title: '官网', sub: '弹出酷狗官方窗口' };
+  if (provider === 'huawei') return { title: 'OAuth', sub: '应用内华为账号授权' };
   return { title: '扫码', sub: '连接后弹出官方窗口' };
 }
 function setManualCookieOpenForProvider(provider, open) {
@@ -907,12 +908,14 @@ function updateLoginProviderUi() {
   var qqBtn = document.getElementById('login-provider-qq');
   var kugouBtn = document.getElementById('login-provider-kugou');
   var qishuiBtn = document.getElementById('login-provider-qishui');
+  var huaweiBtn = document.getElementById('login-provider-huawei');
   var qqCookieSaveBtn = document.getElementById('qq-cookie-save-btn');
   var canOpenNeteaseWeb = !!(window.desktopWindow && typeof window.desktopWindow.openNeteaseMusicLogin === 'function');
   var canUseQishuiQrLogin = true;
   var qishuiSearchReady = qishuiPublicSearchReady();
   var qishuiBusy = !!(qishuiTokenBusy || qishuiOAuthBusy);
   var isSpotify = loginProvider === 'spotify';
+  var isHuawei = loginProvider === 'huawei';
   var spotifyBtn = document.getElementById('login-provider-spotify');
   var loginDrawer = document.getElementById('login-auth-drawer');
   var loginModalPanel = document.querySelector('#login-modal .dual-login-modal');
@@ -988,19 +991,22 @@ function updateLoginProviderUi() {
   if (qqBtn) qqBtn.classList.toggle('active', isQQ);
   if (kugouBtn) kugouBtn.classList.toggle('active', isKugou);
   if (qishuiBtn) qishuiBtn.classList.toggle('active', isQishui);
-  if (title) title.textContent = isQishui ? '扫码登录汽水音乐' : ('扫码登录' + meta.label);
+  if (huaweiBtn) huaweiBtn.classList.toggle('active', isHuawei);
+  if (title) title.textContent = isQishui ? '扫码登录汽水音乐' : (isHuawei ? '登录华为音乐' : ('扫码登录' + meta.label));
   if (desc) desc.innerHTML = isQQ
     ? '打开 <b>QQ 音乐官方网页登录窗口</b> 扫码，成功后会自动同步账号会话。'
     : (isKugou
       ? '打开 <b>酷狗音乐官方网页登录窗口</b> 登录，成功后会自动同步账号会话。'
+    : (isHuawei
+      ? '在应用内打开 <b>华为账号</b> 登录窗口，授权后自动换取华为音乐会话，可同步我的喜欢并按账号权益播放。'
     : (isQishui
       ? '使用已登录账号的 <b>抖音 App</b> 扫描官方二维码并确认，登录后可同步我的喜欢、歌单并按账号权益播放。'
     : (canOpenNeteaseWeb
       ? '打开 <b>网易云音乐官方网页登录窗口</b> 扫码，避开接口二维码风控；成功后会自动同步账号会话。'
-      : '使用 <b>网易云音乐 App</b> 扫码，可同步歌单、红心与播客。')));
+      : '使用 <b>网易云音乐 App</b> 扫码，可同步歌单、红心与播客。'))));
   var manualCookieOpen = isManualCookieOpenForProvider(loginProvider);
   if (shell) {
-    var useWebPreview = isQQ || isKugou || (isNetease && (canOpenNeteaseWeb || manualCookieOpen));
+    var useWebPreview = isQQ || isKugou || isHuawei || (isNetease && (canOpenNeteaseWeb || manualCookieOpen));
     shell.classList.toggle('web-login-preview', useWebPreview);
     shell.classList.toggle('qq-preview', isQQ);
     shell.classList.toggle('netease-preview', isNetease && canOpenNeteaseWeb);
@@ -1015,13 +1021,13 @@ function updateLoginProviderUi() {
   if (qqCookieSaveBtn) qqCookieSaveBtn.textContent = '保存 Cookie';
   if (qqCard) {
     qqCard.style.display = '';
-    qqCard.disabled = isQishui ? (qishuiBusy || !canUseQishuiQrLogin) : (isQQ ? !!qqWebLoginBusy : (isKugou ? !!kugouWebLoginBusy : !!neteaseWebLoginBusy));
+    qqCard.disabled = isQishui ? (qishuiBusy || !canUseQishuiQrLogin) : (isHuawei ? !!huaweiWebLoginBusy : (isQQ ? !!qqWebLoginBusy : (isKugou ? !!kugouWebLoginBusy : !!neteaseWebLoginBusy)));
     var cardMark = qqCard.querySelector('b');
     var cardLabel = qqCard.querySelector('span');
-    if (cardMark) cardMark.textContent = isQQ ? 'QQ' : (isKugou ? 'KG' : (isQishui ? 'QS' : 'NE'));
+    if (cardMark) cardMark.textContent = isQQ ? 'QQ' : (isKugou ? 'KG' : (isQishui ? 'QS' : (isHuawei ? 'HW' : 'NE')));
     if (cardLabel) cardLabel.textContent = isQQ
       ? (qqWebLoginBusy ? '等待扫码确认' : (qqLoginStatus.loggedIn ? '重新打开官方窗口同步会员' : '打开官方扫码窗口'))
-      : (isKugou ? (kugouWebLoginBusy ? '等待登录确认' : '打开官方登录窗口') : (isQishui ? (qishuiOAuthBusy ? '正在生成二维码' : '扫码登录汽水') : (neteaseWebLoginBusy ? '等待扫码确认' : '打开官方登录窗口')));
+      : (isKugou ? (kugouWebLoginBusy ? '等待登录确认' : '打开官方登录窗口') : (isQishui ? (qishuiOAuthBusy ? '正在生成二维码' : '扫码登录汽水') : (isHuawei ? (huaweiWebLoginBusy ? '等待华为账号授权' : '打开华为账号登录') : (neteaseWebLoginBusy ? '等待扫码确认' : '打开官方登录窗口'))));
   }
   if (st) {
     st.className = isManualCookieProvider ? 'preview' : '';
@@ -1031,17 +1037,19 @@ function updateLoginProviderUi() {
         ? (kugouLoginStatus.loggedIn ? ('已保存酷狗音乐会话 · ' + (kugouLoginStatus.nickname || '')) : '点击“登录”打开酷狗音乐官方窗口')
         : (isQishui
           ? qishuiLoginStatusText()
-        : (canOpenNeteaseWeb ? '点击“网页登录”打开网易云官方窗口' : '正在生成二维码…')));
+        : (isHuawei
+          ? (huaweiLoginStatus.loggedIn ? ('已登录华为音乐 · ' + (huaweiLoginStatus.nickname || '')) : '点击“登录”打开华为账号授权窗口')
+        : (canOpenNeteaseWeb ? '点击“网页登录”打开网易云官方窗口' : '正在生成二维码…'))));
   }
   if (refreshBtn) {
-    refreshBtn.disabled = isQishui ? (qishuiBusy || !canUseQishuiQrLogin) : (isQQ ? !!qqWebLoginBusy : (isKugou ? !!kugouWebLoginBusy : !!neteaseWebLoginBusy));
+    refreshBtn.disabled = isQishui ? (qishuiBusy || !canUseQishuiQrLogin) : (isHuawei ? !!huaweiWebLoginBusy : (isQQ ? !!qqWebLoginBusy : (isKugou ? !!kugouWebLoginBusy : !!neteaseWebLoginBusy)));
     var qqNeedsAuthRefresh = isQQ && qqLoginStatus.loggedIn && (
       qqLoginStatus.authorizationIncomplete ||
       qqLoginStatus.playbackKeyReady === false
     );
     var qqNeedsMembershipSync = isQQ && typeof qqMembershipNeedsSync === 'function' && qqMembershipNeedsSync(qqLoginStatus);
-    refreshBtn.textContent = isQishui ? (qishuiOAuthBusy ? '生成中…' : '刷新二维码') : (isQQ ? (qqWebLoginBusy ? '等待扫码…' : (qqNeedsAuthRefresh ? '重新授权' : (qqNeedsMembershipSync ? '同步会员' : (qqLoginStatus.loggedIn ? '刷新状态' : '扫码登录')))) : (isKugou ? (kugouWebLoginBusy ? '等待登录…' : '登录') : (canOpenNeteaseWeb ? (neteaseWebLoginBusy ? '等待扫码…' : '网页登录') : '刷新二维码')));
-    refreshBtn.onclick = isQishui ? openQishuiWebLogin : (isQQ ? (qqNeedsAuthRefresh ? openQQWebLogin : (qqLoginStatus.loggedIn ? refreshQr : openQQWebLogin)) : (isKugou ? openKugouWebLogin : (canOpenNeteaseWeb ? openNeteaseWebLogin : refreshQr)));
+    refreshBtn.textContent = isQishui ? (qishuiOAuthBusy ? '生成中…' : '刷新二维码') : (isQQ ? (qqWebLoginBusy ? '等待扫码…' : (qqNeedsAuthRefresh ? '重新授权' : (qqNeedsMembershipSync ? '同步会员' : (qqLoginStatus.loggedIn ? '刷新状态' : '扫码登录')))) : (isKugou ? (kugouWebLoginBusy ? '等待登录…' : '登录') : (isHuawei ? (huaweiWebLoginBusy ? '等待授权…' : (huaweiLoginStatus.loggedIn ? '重新登录' : '登录')) : (canOpenNeteaseWeb ? (neteaseWebLoginBusy ? '等待扫码…' : '网页登录') : '刷新二维码'))));
+    refreshBtn.onclick = isQishui ? openQishuiWebLogin : (isQQ ? (qqNeedsAuthRefresh ? openQQWebLogin : (qqLoginStatus.loggedIn ? refreshQr : openQQWebLogin)) : (isKugou ? openKugouWebLogin : (isHuawei ? openHuaweiWebLogin : (canOpenNeteaseWeb ? openNeteaseWebLogin : refreshQr))));
   }
   updateLoginNodeGraphUi();
 }
@@ -1061,6 +1069,19 @@ async function refreshQr() {
     if (spotifyStatus) {
       spotifyStatus.textContent = spotifyLoginStatusText(spotifyInfo);
       spotifyStatus.className = 'preview';
+    }
+    return;
+  }
+  if (loginProvider === 'huawei') {
+    qrKey = null;
+    var huaweiStatusEl = document.getElementById('qr-status');
+    var huaweiImg = document.getElementById('qr-img');
+    if (huaweiImg) huaweiImg.src = '';
+    var huaweiInfo = await refreshHuaweiLoginStatus();
+    if (!isLoginRefreshCurrent(refreshProvider, refreshSeq)) return;
+    if (huaweiStatusEl) {
+      huaweiStatusEl.textContent = huaweiInfo && huaweiInfo.loggedIn ? ('已登录华为音乐 · ' + (huaweiInfo.nickname || '')) : '点击“登录”打开华为账号授权窗口';
+      huaweiStatusEl.className = 'preview';
     }
     return;
   }
@@ -1262,6 +1283,7 @@ function toggleQQCookiePanel() {
   updateLoginProviderUi();
 }
 function openProviderWebLogin() {
+  if (loginProvider === 'huawei') return openHuaweiWebLogin();
   if (loginProvider === 'qq') return openQQWebLogin();
   if (loginProvider === 'kugou') return openKugouWebLogin();
   if (loginProvider === 'qishui') return openQishuiWebLogin();
@@ -1424,6 +1446,42 @@ async function openQQWebLogin() {
       qqWebLoginBusy = false;
       updateLoginProviderUi();
     }
+  }
+}
+async function openHuaweiWebLogin() {
+  if (huaweiWebLoginBusy) return;
+  var statusEl = document.getElementById('qr-status');
+  var api = window.desktopWindow;
+  if (!api || !api.isDesktop || typeof api.openHuaweiMusicLogin !== 'function') {
+    if (statusEl) { statusEl.textContent = '当前环境不支持应用内登录窗口，请使用 Mineradio 桌面版。'; statusEl.className = 'fail'; }
+    return;
+  }
+  huaweiWebLoginBusy = true;
+  updateLoginProviderUi();
+  if (statusEl) { statusEl.textContent = '已打开华为账号登录窗口，请完成授权…'; statusEl.className = 'preview'; }
+  try {
+    var result = await api.openHuaweiMusicLogin();
+    if (!result || !result.ok) {
+      throw new Error((result && (result.message || result.error)) || '华为音乐登录未完成');
+    }
+    if (statusEl) { statusEl.textContent = '正在验证华为音乐会话…'; statusEl.className = 'preview'; }
+    var info = await refreshHuaweiLoginStatus();
+    if (!info || !info.loggedIn) throw new Error((info && (info.message || info.error)) || '华为音乐会话不可用');
+    activeAccountProvider = 'huawei';
+    markLoginWorkflowConnected('huawei');
+    renderUserBtn();
+    await refreshUserPlaylists(true);
+    if (typeof loadHomeDiscover === 'function') loadHomeDiscover(true);
+    if (statusEl) { statusEl.textContent = '华为音乐已登录'; statusEl.className = 'scan'; }
+    setTimeout(function () {
+      closeLoginModal();
+      showToast('华为音乐已登录: ' + (info.nickname || info.userId || ''));
+    }, 420);
+  } catch (e) {
+    if (statusEl) { statusEl.textContent = '登录失败: ' + (e && e.message || e); statusEl.className = 'fail'; }
+  } finally {
+    huaweiWebLoginBusy = false;
+    updateLoginProviderUi();
   }
 }
 async function openKugouWebLogin() {

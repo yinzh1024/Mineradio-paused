@@ -1,5 +1,5 @@
 function loggedProviderCount() {
-  return ['netease', 'qq', 'kugou', 'qishui'].filter(function (key) { return hasPlatformLogin(key); }).length;
+  return ['netease', 'qq', 'kugou', 'qishui', 'huawei'].filter(function (key) { return hasPlatformLogin(key); }).length;
 }
 function updateUserModalUi() {
   activeAccountProvider = firstLoggedProvider();
@@ -15,6 +15,7 @@ function updateUserModalUi() {
   var addQQ = document.getElementById('account-add-qq');
   var addKugou = document.getElementById('account-add-kugou');
   var addQishui = document.getElementById('account-add-qishui');
+  var addHuawei = document.getElementById('account-add-huawei');
   if (chip) {
     chip.className = 'account-provider-chip ' + activeAccountProvider;
     chip.innerHTML = '<span class="account-source-dot ' + meta.dot + '"></span><span>' + meta.label + '</span>';
@@ -37,6 +38,12 @@ function updateUserModalUi() {
       var qishuiSync = st && st.webSession ? '可同步我的喜欢、歌单并按账号权益播放' : '请使用抖音 App 扫码';
       vipEl.textContent = qishuiMode + '  /  ' + qishuiSync;
       vipEl.style.color = 'rgba(69,214,143,0.78)';
+    } else if (activeAccountProvider === 'huawei') {
+      var hwLogged = !!(st && st.loggedIn);
+      vipEl.textContent = hwLogged
+        ? ('UID: ' + ((st && st.userId) || '-') + '  /  华为音乐会话' + (st && st.stale ? '（待验证）' : ''))
+        : '华为音乐未登录';
+      vipEl.style.color = hwLogged ? 'rgba(229,73,63,0.86)' : 'rgba(229,73,63,0.55)';
     } else if (activeAccountProvider === 'spotify') {
       var spProduct = st && st.product === 'premium' ? 'Spotify Premium' : (st && st.product ? ('Spotify ' + String(st.product).toUpperCase()) : 'Spotify 方案未知');
       vipEl.textContent = 'ID: ' + ((st && st.userId) || '-') + '  /  ' + spProduct + '  /  可同步歌单和 Liked Songs';
@@ -49,7 +56,7 @@ function updateUserModalUi() {
       vipEl.style.color = qqVipPending ? 'rgba(255,232,174,0.86)' : (hasProviderVip('qq', st) ? 'rgba(0,245,212,0.82)' : 'rgba(0,245,212,0.58)');
     }
   }
-  ['netease', 'qq', 'kugou', 'qishui', 'both'].forEach(function (key) {
+  ['netease', 'qq', 'kugou', 'qishui', 'huawei', 'both'].forEach(function (key) {
     var btn = document.getElementById('user-provider-' + key);
     if (btn) btn.classList.toggle('active', key === 'both' ? dualAccountMode : (!dualAccountMode && activeAccountProvider === key));
   });
@@ -57,11 +64,13 @@ function updateUserModalUi() {
   if (addQQ) addQQ.textContent = hasPlatformLogin('qq') ? '查看 QQ 音乐' : '补登 QQ 音乐';
   if (addKugou) addKugou.textContent = hasPlatformLogin('kugou') ? '查看酷狗音乐' : '补登酷狗音乐';
   if (addQishui) addQishui.textContent = hasPlatformLogin('qishui') ? '重新登录汽水' : '登录汽水音乐';
+  if (addHuawei) addHuawei.textContent = hasPlatformLogin('huawei') ? '重新登录华为音乐' : '登录华为音乐';
   if (logoutBtn) logoutBtn.textContent =
     activeAccountProvider === 'qq' ? '退出 QQ 音乐' :
     (activeAccountProvider === 'kugou' ? '退出酷狗音乐' :
     (activeAccountProvider === 'qishui' ? '清除汽水登录态' :
-    (activeAccountProvider === 'spotify' ? '退出 Spotify' : '退出网易云')));
+    (activeAccountProvider === 'huawei' ? '退出华为音乐' :
+    (activeAccountProvider === 'spotify' ? '退出 Spotify' : '退出网易云'))));
   if (hint) hint.textContent = dualAccountMode
     ? '右上角已切换为多平台并排展示。'
     : '可切换右上角展示的平台；“我两个都要”会并排显示当前已登录的平台。';
@@ -78,7 +87,7 @@ function showUserModal() {
 }
 function closeUserModal() { closeGsapModal(document.getElementById('user-modal')); }
 function setActiveAccountProvider(provider) {
-  provider = provider === 'qq' ? 'qq' : (provider === 'kugou' ? 'kugou' : (provider === 'qishui' ? 'qishui' : (provider === 'spotify' ? 'spotify' : 'netease')));
+  provider = provider === 'qq' ? 'qq' : (provider === 'kugou' ? 'kugou' : (provider === 'qishui' ? 'qishui' : (provider === 'huawei' ? 'huawei' : (provider === 'spotify' ? 'spotify' : 'netease'))));
   if (!hasPlatformLogin(provider)) {
     openProviderLogin(provider);
     return;
@@ -102,7 +111,7 @@ function requestDualLoginMode() {
   enableDualAccountView();
 }
 function openProviderLogin(provider) {
-  provider = provider === 'qq' ? 'qq' : (provider === 'kugou' ? 'kugou' : (provider === 'qishui' ? 'qishui' : (provider === 'spotify' ? 'spotify' : 'netease')));
+  provider = provider === 'qq' ? 'qq' : (provider === 'kugou' ? 'kugou' : (provider === 'qishui' ? 'qishui' : (provider === 'huawei' ? 'huawei' : (provider === 'spotify' ? 'spotify' : 'netease'))));
   closeUserModal();
   loginProvider = provider;
   showLoginModal({ provider: provider });
@@ -143,12 +152,14 @@ function resetAllProviderRendererLoginState() {
   kugouLoginStatus = { provider: 'kugou', loggedIn: false, preview: false, nickname: '酷狗音乐', userId: '', avatar: '', vipType: 0, vipLevel: 'none', isVip: false, isSvip: false, playbackKeyReady: false };
   qishuiLoginStatus = { provider: 'qishui', loggedIn: false, configured: false, oauthConfigured: false, oauthMissing: [], preview: false, nickname: '汽水音乐', userId: '', avatar: '', vipType: 0, vipLevel: 'none', isVip: false, isSvip: false, playbackKeyReady: false, playbackMode: 'recommend-match' };
   spotifyLoginStatus = { provider: 'spotify', loggedIn: false, configured: false, oauthConfigured: false, oauthMissing: [], preview: false, nickname: 'Spotify', userId: '', avatar: '', product: '', vipType: 0, vipLevel: 'none', isVip: false, isSvip: false, playbackKeyReady: false, playbackMode: 'recommend-match', tokenConfigured: false, tokenFileExists: false, credentialsFileExists: false, localConfigMissing: false };
+  huaweiLoginStatus = { provider: 'huawei', loggedIn: false, configured: true, preview: false, nickname: '华为音乐', userId: '', avatar: '', vipType: 0, vipLevel: 'unknown', isVip: false, isSvip: false, vipLabel: '未知会员状态', playbackKeyReady: false, playbackMode: 'direct-url' };
   loginStatusChecked = true;
   loginStatusCheckFailed = false;
   neteasePlaylists = [];
   qqPlaylists = [];
   kugouPlaylists = [];
   qishuiPlaylists = [];
+  huaweiPlaylists = [];
   spotifyPlaylists = [];
   userPlaylists = (builtInPlaylists || []).slice();
   myPodcastCollections = [];
@@ -187,7 +198,8 @@ async function logoutAllAccountsAndResetEasterEgg() {
       apiJson('/api/logout'),
       apiJson('/api/qq/logout'),
       apiJson('/api/kugou/logout'),
-      apiJson('/api/qishui/logout')
+      apiJson('/api/qishui/logout'),
+      apiJson('/api/huawei/logout')
     ]);
     var result = await requestLoginEasterEggReplayReset();
     if (!result || !result.ok || result.unlocked || result.resetComplete === false) {
@@ -222,6 +234,26 @@ async function logoutAllAccountsAndResetEasterEgg() {
 }
 
 async function logoutActiveAccount() {
+  if (activeAccountProvider === 'huawei') {
+    try { await apiJson('/api/huawei/logout'); } catch (e) { }
+    try {
+      if (window.desktopWindow && typeof window.desktopWindow.clearHuaweiMusicLogin === 'function') {
+        await window.desktopWindow.clearHuaweiMusicLogin();
+      }
+    } catch (e) { }
+    huaweiLoginStatus = { provider: 'huawei', loggedIn: false, configured: true, preview: false, nickname: '华为音乐', userId: '', avatar: '', vipType: 0, vipLevel: 'unknown', isVip: false, isSvip: false, vipLabel: '未知会员状态', playbackKeyReady: false, playbackMode: 'direct-url' };
+    huaweiPlaylists = [];
+    userPlaylists = userPlaylists.filter(function (pl) { return pl.provider !== 'huawei'; });
+    playlistCatalogRevision += 1;
+    dualAccountMode = false;
+    activeAccountProvider = firstLoggedProvider();
+    renderUserBtn();
+    safeShelfRebuild('huawei-logout');
+    if (hasAnyPlatformLogin()) updateUserModalUi();
+    else closeUserModal();
+    showToast('已退出华为音乐');
+    return;
+  }
   if (activeAccountProvider === 'qishui') {
     try { await apiJson('/api/qishui/logout'); } catch (e) { }
     try {
@@ -294,7 +326,7 @@ async function doLogout() {
   neteasePlaylists = [];
   if (!hasPlatformLogin('netease') || loggedProviderCount() < 2) dualAccountMode = false;
   activeAccountProvider = firstLoggedProvider();
-  userPlaylists = qqPlaylists.concat(kugouPlaylists || [], qishuiPlaylists || []);
+  userPlaylists = qqPlaylists.concat(kugouPlaylists || [], qishuiPlaylists || [], huaweiPlaylists || []);
   playlistCatalogRevision += 1;
   myPodcastCollections = [];
   myPodcastItems = {};

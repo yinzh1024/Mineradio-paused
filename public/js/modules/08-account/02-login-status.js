@@ -452,6 +452,52 @@ function startQishuiLoginStatusAutoRefresh() {
   }, 45000);
 }
 
+function normalizeHuaweiLoginStatus(info) {
+  var fallback = { provider: 'huawei', loggedIn: false, configured: true, preview: false, nickname: '华为音乐', userId: '', avatar: '', vipType: 0, vipLevel: 'unknown', isVip: false, isSvip: false, vipLabel: '未知会员状态', stale: false, reauthRequired: false, playbackKeyReady: false, playbackMode: 'direct-url' };
+  var loggedIn = !!(info && info.loggedIn);
+  return Object.assign({}, fallback, info || {}, {
+    provider: 'huawei',
+    loggedIn: loggedIn,
+    configured: !!(info && info.configured !== false),
+    nickname: (info && (info.nickname || info.displayName)) || fallback.nickname,
+    userId: (info && (info.userId || info.accountKey)) || '',
+    playbackKeyReady: loggedIn ? (info && info.playbackKeyReady !== false) : false,
+    playbackMode: 'direct-url'
+  });
+}
+
+async function refreshHuaweiLoginStatus() {
+  try {
+    var info = await apiJson('/api/huawei/status?t=' + Date.now());
+    if (info && info.error && !info.reauthRequired) throw new Error(info.error);
+    var prevLogged = !!huaweiLoginStatus.loggedIn;
+    huaweiLoginStatus = normalizeHuaweiLoginStatus(info);
+    auditProviderVipState('huawei', huaweiLoginStatus);
+    if (!huaweiLoginStatus.loggedIn) {
+      if (prevLogged || huaweiLoginWasLoggedIn) showToast(huaweiLoginStatus.stale ? '华为音乐登录已失效' : '华为音乐已掉登录');
+      huaweiPlaylists = [];
+      userPlaylists = userPlaylists.filter(function (pl) { return pl.provider !== 'huawei'; });
+      playlistCatalogRevision += 1;
+    } else if (huaweiLoginStatus.stale) {
+      showToast('华为音乐登录状态可能已失效');
+    }
+    huaweiLoginWasLoggedIn = !!huaweiLoginStatus.loggedIn;
+    if (!hasPlatformLogin(activeAccountProvider)) activeAccountProvider = firstLoggedProvider();
+    renderUserBtn();
+    return huaweiLoginStatus;
+  } catch (e) {
+    console.warn('Huawei login status failed:', e);
+    return huaweiLoginStatus;
+  }
+}
+
+function startHuaweiLoginStatusAutoRefresh() {
+  if (huaweiLoginAutoRefreshTimer) clearInterval(huaweiLoginAutoRefreshTimer);
+  huaweiLoginAutoRefreshTimer = setInterval(function () {
+    refreshHuaweiLoginStatus().catch(function (e) { console.warn('Huawei login auto refresh failed:', e); });
+  }, 60000);
+}
+
 function normalizeSpotifyLoginStatus(info) {
   var fallback = { provider: 'spotify', loggedIn: false, configured: false, oauthConfigured: false, oauthMissing: [], preview: false, nickname: 'Spotify', userId: '', accountId: '', avatar: '', product: '', membershipKnown: false, vipType: 0, vipLevel: 'none', isVip: false, isSvip: false, stale: false, reauthRequired: false, playbackKeyReady: false, playbackMode: 'recommend-match', tokenConfigured: false, tokenFileExists: false, credentialsFileExists: false, localConfigMissing: false, searchReady: false };
   var loggedIn = !!(info && info.loggedIn);
