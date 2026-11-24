@@ -53,6 +53,15 @@ Authorization: Digest username=app-music-baseline, nonce=<随机>, created=<ISO8
 - 兜底：媒体 `loadedmetadata` 的真实时长明显短于曲目元数据（`song.duration`）时，
   标记试听并弹提示（所有 provider 通用）
 
+## 下架曲目的处理
+
+华为歌单里常混有已下架曲目（`status:"0"`，取流返回 `200002 Content is offline!`）：
+
+- 列表里透传 `playable/offline`（不再一律标可播）
+- 取流遇到下架时，按「名称 + 歌手 + 时长」用 `fuzzysearch` 重匹配同名可用版本并直接播放，
+  响应标记 `source:"huawei-music-rematch"`、`rematchedFrom/rematchedTo/rematchedName`
+- 前端会提示「原曲已下架 · 已自动切换到同名版本」；重匹配失败才走跨平台换源
+
 ## 会员状态 / 会话续期
 
 - **会员状态**：无公开 userinfo 接口，用「无损取流能力」探测（固定 VIP+FLAC 曲目请求

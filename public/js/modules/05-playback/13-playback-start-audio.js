@@ -631,7 +631,11 @@ async function resolveAlbumGaplessPlaybackData(song) {
     return apiJson('/api/qishui/song/url?id=' + encodeURIComponent(song.id || song.providerSongId || '') + qqPlaybackEvidenceQuery(song) + qualityParam, { timeoutMs: 15000 });
   }
   if (playbackProvider === 'huawei') {
-    return apiJson('/api/huawei/song/url?id=' + encodeURIComponent(song.id || song.providerSongId || '') + qualityParam, { timeoutMs: 15000 });
+    return apiJson('/api/huawei/song/url?id=' + encodeURIComponent(song.id || song.providerSongId || '') +
+      '&name=' + encodeURIComponent(song.name || song.title || '') +
+      '&artist=' + encodeURIComponent(song.artist || '') +
+      '&duration=' + encodeURIComponent(playbackDurationFromSong(song) || '') +
+      qualityParam, { timeoutMs: 15000 });
   }
   if (playbackProvider === 'spotify') {
     return apiJson('/api/spotify/song/url?id=' + encodeURIComponent(song.id || song.providerSongId || song.spotifyId || '') +
@@ -1193,7 +1197,11 @@ async function playQueueAt(idx, opts) {
       } else if (isQishuiPlayback) {
         data = await apiJson('/api/qishui/song/url?id=' + encodeURIComponent(song.id || song.providerSongId || '') + qqPlaybackEvidenceQuery(song) + qualityParam, { timeoutMs: 15000 });
       } else if (isHuaweiPlayback) {
-        data = await apiJson('/api/huawei/song/url?id=' + encodeURIComponent(song.id || song.providerSongId || '') + qualityParam, { timeoutMs: 15000 });
+        data = await apiJson('/api/huawei/song/url?id=' + encodeURIComponent(song.id || song.providerSongId || '') +
+          '&name=' + encodeURIComponent(song.name || song.title || '') +
+          '&artist=' + encodeURIComponent(song.artist || '') +
+          '&duration=' + encodeURIComponent(playbackDurationFromSong(song) || '') +
+          qualityParam, { timeoutMs: 15000 });
       } else if (isSpotifyPlayback) {
         data = await apiJson('/api/spotify/song/url?id=' + encodeURIComponent(song.id || song.providerSongId || song.spotifyId || '') +
           '&spotifyId=' + encodeURIComponent(song.spotifyId || '') +
@@ -1254,6 +1262,10 @@ async function playQueueAt(idx, opts) {
           data.trial = true;
           data.trialDuration = playSec;
         }
+      }
+      // 华为下架曲目已自动匹配同名版本：轻提示一次
+      if (data.source === 'huawei-music-rematch' && data.rematchedName && !opts.startupAutoplay) {
+        showSourceFallbackNotice('原曲已下架', '已自动切换到华为音乐同名版本：' + data.rematchedName);
       }
       // 只拿到试听片段：优先自动换到其它已登录平台；换不到再播试听并提示
       // （已处于换源链内时不再递归，避免把换来的试听也中断）

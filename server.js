@@ -5608,7 +5608,12 @@ const server = http.createServer(async (req, res) => {
     try {
       sendJSON(res, await handleHuaweiSongUrl(
         url.searchParams.get('id') || url.searchParams.get('trackId') || '',
-        url.searchParams.get('quality') || url.searchParams.get('level') || ''
+        url.searchParams.get('quality') || url.searchParams.get('level') || '',
+        {
+          name: url.searchParams.get('name') || '',
+          artist: url.searchParams.get('artist') || '',
+          duration: url.searchParams.get('duration') || '',
+        }
       ));
     } catch (err) {
       console.error('[HuaweiSongUrl]', err);

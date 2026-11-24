@@ -572,6 +572,10 @@ function normalizeHuaweiTrack(raw) {
     const fileInfos = Array.isArray(exInfo.fileInfos) ? exInfo.fileInfos : [];
     const duration = pickDurationSeconds(fileInfos, exInfo.duration, raw.duration);
     const vip = normalizeText(exInfo.vip);
+    // status: 1=可播；0=下架/不可播（歌单里常见）。缺省视为可播。
+    const status = normalizeText(raw.status);
+    const playable = status === '' || status === '1';
+    const quality = normalizeText(raw.quality);
     return {
         provider: 'huawei',
         source: 'huawei',
@@ -587,8 +591,9 @@ function normalizeHuaweiTrack(raw) {
         duration,
         fee: vip === '2' ? 1 : 0,
         vipRequired: vip === '2',
-        quality: normalizeText(raw.quality),
-        playable: true,
+        quality,
+        playable,
+        offline: !playable,
         playbackMode: 'direct-url',
         lyricAddress: normalizeText(raw.lyricAddress),
         huaweiExInfo: undefined,
@@ -684,7 +689,90 @@ function huaweiLyricAddresses(json) {
     return { lrc, hmrc };
 }
 
-async function handleHuaweiSongUrl(id, quality) {
+// ── 下架曲目：同名重匹配（官方曲目下架后仍可能有同名/同版本可用） ──
+
+const huaweiRematchCache = new Map();
+
+function huaweiNormalizeMatchText(value) {
+    return String(value || '')
+        .normalize('NFKC')
+        .toLowerCase()
+        .replace(/[（(【\[][^）)】\]]*[）)】\]]/g, '')
+        .replace(/[\s·・,，。.!！?？'"“”‘’|\-_/]+/g, '');
+}
+
+function huaweiBaseTitle(name) {
+    return String(name || '')
+        .replace(/[（(【\[][^）)】\]]*[）)】\]]/g, '')
+        .replace(/(live|remix|伴奏|纯音乐|dj版?|翻唱|cover|版)$/i, '')
+        .trim();
+}
+
+function huaweiPrimaryArtist(artist) {
+    return String(artist || '').split(/\s*[/、,&]\s*/)[0].trim();
+}
+
+async function rematchHuaweiTrack(opts) {
+    opts = opts || {};
+    const name = normalizeText(opts.name);
+    if (!name) return null;
+    const cacheKey = huaweiNormalizeMatchText(name) + '|' + huaweiNormalizeMatchText(opts.artist);
+    if (huaweiRematchCache.has(cacheKey)) return huaweiRematchCache.get(cacheKey);
+    const baseTitle = huaweiBaseTitle(name);
+    const artist = huaweiPrimaryArtist(opts.artist);
+    const query = [baseTitle, artist].filter(Boolean).join(' ').trim();
+    if (!query) return null;
+    let best = null;
+    try {
+        const json = await musicPost('/music-search-service/v10/service/fuzzysearch', {
+            contentType: '1',
+            correct: '1',
+            queryWord: query,
+            start: '0',
+            limit: '10',
+        }, '');
+        const items = (Array.isArray(json.songSimpleInfos) ? json.songSimpleInfos : [])
+            .filter((item) => normalizeText(item.status) === '1');
+        const targetName = huaweiNormalizeMatchText(name);
+        const targetBase = huaweiNormalizeMatchText(baseTitle);
+        const targetArtist = huaweiNormalizeMatchText(artist);
+        const targetDuration = Number(opts.duration) || 0;
+        items.forEach((item) => {
+            const candidateName = huaweiNormalizeMatchText(item.contentName);
+            const candidateBase = huaweiNormalizeMatchText(huaweiBaseTitle(item.contentName));
+            const candidateArtist = huaweiNormalizeMatchText(item.artistName);
+            let score = 0;
+            if (candidateName === targetName) score += 100;
+            else if (targetBase && candidateBase === targetBase) score += 60;
+            else if (targetBase && candidateBase.indexOf(targetBase) >= 0) score += 30;
+            if (targetArtist && candidateArtist.indexOf(targetArtist) >= 0) score += 40;
+            const candidateDuration = pickDurationSeconds(item.contentExInfo);
+            if (targetDuration > 0 && candidateDuration > 0) {
+                const diff = Math.abs(candidateDuration - targetDuration);
+                if (diff <= 3) score += 20;
+                else if (diff <= 8) score += 8;
+            }
+            const nameMatched = candidateName === targetName || (targetBase && candidateBase.indexOf(targetBase) >= 0);
+            const artistMatched = !!(targetArtist && candidateArtist.indexOf(targetArtist) >= 0);
+            if (!nameMatched) return;
+            if (!artistMatched && score < 60) return;
+            if (!best || score > best.score) {
+                best = { id: normalizeText(item.contentID), name: normalizeText(item.contentName), artist: normalizeText(item.artistName), score };
+            }
+        });
+    } catch (_) {
+        best = null;
+    }
+    huaweiRematchCache.set(cacheKey, best);
+    if (huaweiRematchCache.size > 500) {
+        const first = huaweiRematchCache.keys().next().value;
+        if (first) huaweiRematchCache.delete(first);
+    }
+    return best;
+}
+
+async function handleHuaweiSongUrl(id, quality, opts) {
+    opts = opts || {};
     id = normalizeText(id);
     if (!id) return huaweiUnavailable('缺少歌曲 ID', 'missing_id');
     const requested = normalizeText(quality || 'standard').toLowerCase();
@@ -711,9 +799,52 @@ async function handleHuaweiSongUrl(id, quality) {
                 });
             }
         } else {
-            return huaweiUnavailable(err.message || '华为音乐取流失败', err.code || 'HUAWEI_SONG_URL_FAILED', {
-                reauthRequired: err.code === 'HUAWEI_SESSION_EXPIRED',
-            });
+            const message = normalizeText(err && (err.detail || err.message));
+            const offline = (err && String(err.resultCode) === '200002')
+                || /offline|下架|版权|不可播/i.test(message);
+            if (offline) {
+                // 下架曲目：先按名称/歌手/时长重匹配同名可用版本
+                const matched = await rematchHuaweiTrack({
+                    name: opts.name || opts.title,
+                    artist: opts.artist,
+                    duration: opts.duration,
+                }).catch(() => null);
+                if (matched && matched.id && matched.id !== id) {
+                    try {
+                        const retry = await resolveHuaweiPlayback(matched.id, requestedQualityType);
+                        const retryUrl = normalizeText(retry.json && retry.json.fileURL);
+                        if (retryUrl && isHuaweiResourceUrl(retryUrl)) {
+                            const value = {
+                                provider: 'huawei',
+                                playbackMode: 'direct-url',
+                                url: retryUrl,
+                                playable: true,
+                                trial: false,
+                                loggedIn: true,
+                                playbackKeyReady: true,
+                                membershipKnown: false,
+                                vipLevel: 'unknown',
+                                level: usedQualityType === '3' ? 'lossless' : 'standard',
+                                quality: usedQualityType === '3' ? 'lossless' : 'standard',
+                                requestedQuality: requested,
+                                duration: pickDurationSeconds(retry.json && retry.json.fileInfos) || 0,
+                                source: 'huawei-music-rematch',
+                                rematchedFrom: id,
+                                rematchedTo: matched.id,
+                                rematchedName: matched.name,
+                                encrypted: false,
+                            };
+                            huaweiPlaybackCache.set(cacheKey, { at: Date.now(), value });
+                            return value;
+                        }
+                    } catch (_) {}
+                }
+            }
+            return huaweiUnavailable(
+                offline ? '该曲目已在华为音乐下架，正在尝试其他音源' : (message || '华为音乐取流失败'),
+                offline ? 'HUAWEI_CONTENT_OFFLINE' : (err.code || 'HUAWEI_SONG_URL_FAILED'),
+                { reauthRequired: err.code === 'HUAWEI_SESSION_EXPIRED', offline }
+            );
         }
     }
 
