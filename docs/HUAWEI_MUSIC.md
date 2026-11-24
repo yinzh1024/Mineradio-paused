@@ -67,9 +67,13 @@ Authorization: Digest username=app-music-baseline, nonce=<随机>, created=<ISO8
 - **会员状态**：无公开 userinfo 接口，用「无损取流能力」探测（固定 VIP+FLAC 曲目请求
   `qualityType=3`，返回 `playQuality=3` 即视为 VIP），结果缓存 12 小时；播放无损成功时也会
   顺带标记。状态写入会话文件，用户弹窗显示「华为音乐 VIP」
-- **会话续期**：OAuth 时保存 `access_token` / `refresh_token`；音乐会话过期
-  （`token expired`）时自动用 `refresh_token` 换新 access_token、重走 `loginex` 并重试一次。
-  **注意**：该能力需要一次新的登录才会写入 `refresh_token`（旧会话文件没有该字段）
+- **会话续期**：分两步。① 音乐 token 失效但 OAuth `access_token` 仍在有效期（约 1h）时，
+  直接用 accessToken 重走 `loginex` 换新音乐会话；② accessToken 也过期则尝试
+  `refresh_token`（华为要求 `client_secret`，官方客户端未带，通常返回
+  `1101 missing required parameter: client_secret`），失败则标记
+  `reauthRequired` 提示重新登录。
+  会话失效的判据：所有带 token 的接口统一返回 `990000 System error!`（搜索免 token 仍可用），
+  遇到时按 `HUAWEI_SESSION_INVALID` 处理
 
 ## 前端接入点
 
@@ -83,6 +87,6 @@ Authorization: Digest username=app-music-baseline, nonce=<随机>, created=<ISO8
 ## 已知限制
 
 - 会员状态是「无损取流探测」的推断，不是官方会员接口，可能因曲目下架/授权变化误判
-- 刷新令牌只在新的登录后写入；老会话文件过期仍需重新登录
+- `refresh_token` 授权需要 client_secret（客户端未内置），accessToken 过期后只能重新登录
 - 歌单重命名/删除/简介修改未接入 UI（后端已有删除/加歌/删歌能力）
 - 非官方接口，可能随平台变更失效

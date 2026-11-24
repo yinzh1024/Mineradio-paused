@@ -231,48 +231,79 @@ function updateHuaweiSessionMeta(patch) {
     }
 }
 
+// 华为 OAuth 的 refresh_token 授权要求 client_secret（官方客户端未带），
+// 因此续期分两步：
+//   1) 音乐 token 失效但 OAuth accessToken 仍有效 → 直接用 accessToken 重走 loginex；
+//   2) accessToken 也过期 → 尝试 refresh_token（多数客户端会 1101 missing client_secret），
+//      失败则要求重新登录。
 async function refreshHuaweiSession() {
     const session = readHuaweiSession();
-    if (!session || !session.refreshToken) {
+    if (!session) {
         throw Object.assign(new Error('HUAWEI_REFRESH_UNAVAILABLE'), { code: 'HUAWEI_REFRESH_UNAVAILABLE' });
     }
-    const form = new URLSearchParams({
-        grant_type: 'refresh_token',
-        client_id: HUAWEI_CLIENT_ID,
-        refresh_token: session.refreshToken,
-    });
-    const tokenRes = await requestBuffer(HUAWEI_TOKEN_ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: form.toString(),
-        timeoutMs: 12000,
-    });
-    let tokenJson = null;
-    try {
-        tokenJson = JSON.parse(tokenRes.buffer.toString('utf8'));
-    } catch (_) {
-        throw Object.assign(new Error('HUAWEI_REFRESH_BAD_JSON'), { code: 'HUAWEI_REFRESH_BAD_JSON' });
+
+    const exchangeWithAccessToken = async (accessToken) => {
+        const json = await musicPost('/music-odpapp-service/v5/service/userinfo/loginex', { accessToken }, '');
+        const token = normalizeText(json.token);
+        const snsUserID = normalizeText(json.snsUserID);
+        if (!token || !snsUserID) {
+            throw Object.assign(new Error('HUAWEI_REFRESH_INCOMPLETE'), { code: 'HUAWEI_REFRESH_INCOMPLETE' });
+        }
+        return writeHuaweiSession({
+            token,
+            snsUserID,
+            expireTime: normalizeText(json.expireTime),
+            accessToken,
+            refreshToken: session.refreshToken,
+            accessTokenExpiresAt: session.accessTokenExpiresAt,
+            vipLevel: session.vipLevel,
+            vipCheckedAt: session.vipCheckedAt,
+        });
+    };
+
+    // 1) 用仍在有效期内的 OAuth accessToken 重换音乐会话
+    if (session.accessToken && (!session.accessTokenExpiresAt || session.accessTokenExpiresAt > Date.now())) {
+        try {
+            return await exchangeWithAccessToken(session.accessToken);
+        } catch (_) {}
     }
-    const accessToken = normalizeText(tokenJson && tokenJson.access_token);
-    if (!accessToken) {
-        throw Object.assign(new Error('HUAWEI_REFRESH_FAILED'), { code: 'HUAWEI_REFRESH_FAILED' });
+
+    // 2) 尝试 refresh_token（需要 client_secret，通常不可用）
+    if (session.refreshToken) {
+        const form = new URLSearchParams({
+            grant_type: 'refresh_token',
+            client_id: HUAWEI_CLIENT_ID,
+            refresh_token: session.refreshToken,
+        });
+        const tokenRes = await requestBuffer(HUAWEI_TOKEN_ENDPOINT, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: form.toString(),
+            timeoutMs: 12000,
+        });
+        let tokenJson = null;
+        try {
+            tokenJson = JSON.parse(tokenRes.buffer.toString('utf8'));
+        } catch (_) {
+            throw Object.assign(new Error('HUAWEI_REFRESH_BAD_JSON'), { code: 'HUAWEI_REFRESH_BAD_JSON' });
+        }
+        const accessToken = normalizeText(tokenJson && tokenJson.access_token);
+        if (accessToken) {
+            try {
+                return await exchangeWithAccessToken(accessToken).then((saved) => writeHuaweiSession({
+                    token: saved.token,
+                    snsUserID: saved.snsUserID,
+                    expireTime: saved.expireTime,
+                    accessToken,
+                    refreshToken: normalizeText(tokenJson.refresh_token) || session.refreshToken,
+                    accessTokenExpiresAt: Date.now() + Math.max(60, Number(tokenJson.expires_in) || 3600) * 1000,
+                    vipLevel: session.vipLevel,
+                    vipCheckedAt: session.vipCheckedAt,
+                }));
+            } catch (_) {}
+        }
     }
-    const json = await musicPost('/music-odpapp-service/v5/service/userinfo/loginex', { accessToken }, '');
-    const token = normalizeText(json.token);
-    const snsUserID = normalizeText(json.snsUserID);
-    if (!token || !snsUserID) {
-        throw Object.assign(new Error('HUAWEI_REFRESH_INCOMPLETE'), { code: 'HUAWEI_REFRESH_INCOMPLETE' });
-    }
-    return writeHuaweiSession({
-        token,
-        snsUserID,
-        expireTime: normalizeText(json.expireTime),
-        accessToken,
-        refreshToken: normalizeText(tokenJson.refresh_token) || session.refreshToken,
-        accessTokenExpiresAt: Date.now() + Math.max(60, Number(tokenJson.expires_in) || 3600) * 1000,
-        vipLevel: session.vipLevel,
-        vipCheckedAt: session.vipCheckedAt,
-    });
+    throw Object.assign(new Error('HUAWEI_REFRESH_FAILED'), { code: 'HUAWEI_REFRESH_FAILED' });
 }
 
 // 带会话的 API 调用：token 过期时自动续期并重试一次
