@@ -664,8 +664,10 @@ function prevTrack(userInitiated) {
   Promise.resolve(playQueueAt(currentIdx, opts)).finally(forcePlaybackControlsInteractive);
 }
 function shuffleQueue() {
+  playMode = 'shuffle';
   reorderQueueForShufflePlaybackOrder(currentIdx, { reason: 'shuffle-queue' });
-  showToast('队列已随机');
+  updatePlayModeButton(true);
+  showToast('随机播放已开启');
 }
 function clearQueue() {
   if (typeof cancelPlaylistQueueHydration === 'function') cancelPlaylistQueueHydration('clear-queue');
@@ -713,8 +715,8 @@ function updatePlayModeButton(animate) {
   if (chip) chip.textContent = label;
   if (btn) {
     btn.dataset.mode = playMode;
-    btn.title = label;
-    btn.setAttribute('aria-label', label);
+    btn.title = '播放模式：' + label + '（点击切换）';
+    btn.setAttribute('aria-label', '播放模式：' + label);
     btn.classList.toggle('active', playMode !== 'loop');
   }
   if (icon) icon.innerHTML = playModeIconMarkup(playMode);
