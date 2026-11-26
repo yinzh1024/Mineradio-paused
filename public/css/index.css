@@ -5682,6 +5682,11 @@ body.home-controls-locked #bottom-bar {
   animation: cuefield-ready-pulse 1.8s ease-in-out infinite
 }
 
+/* 实验功能默认关闭且当前不可用，全局隐藏入口，避免和播放模式按钮混淆 */
+#cuefield-automix-btn {
+  display: none !important
+}
+
 @keyframes cuefield-ready-pulse {
   50% { transform: translateY(-1px) scale(1.08) }
 }
@@ -7436,7 +7441,6 @@ body.immersive-mode .control-cluster.modes {
 body.immersive-mode .control-track,
 body.immersive-mode #heart-btn,
 body.immersive-mode #collect-btn,
-body.immersive-mode #play-mode-btn,
 body.immersive-mode .lyrics-toggle-btn,
 body.immersive-mode #mini-queue-btn,
 body.immersive-mode #quality-control,
