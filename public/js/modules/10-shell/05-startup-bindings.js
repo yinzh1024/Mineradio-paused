@@ -47,6 +47,7 @@ startHuaweiLoginStatusAutoRefresh();
 if (typeof setupFullscreenDiyLayoutTracking === 'function') setupFullscreenDiyLayoutTracking();
 if (startupLoginStatusPromise && startupLoginStatusPromise.then) {
   startupLoginStatusPromise.then(function () {
+    accountStartupSettled = true;
     if (hasAnyPlatformLogin()) {
       refreshUserPlaylists(true);
       loadHomeDiscover(true);
